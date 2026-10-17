@@ -1,0 +1,7 @@
+// The C API as the Swift (and Clang) module CWren. This file sits beside
+// Wren.h in a release's include folder; Wren.h includes the other headers.
+module CWren {
+  umbrella header "Wren.h"
+  export *
+  link framework "Wren Framework"
+}

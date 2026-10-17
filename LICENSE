@@ -1,0 +1,9 @@
+Copyright 2026 Multibox Labs. All rights reserved.
+
+Wren is proprietary software. No right to use, copy, modify, merge,
+publish, distribute, sublicense or sell it, or to make works based on it,
+is granted without the prior written permission of Multibox Labs.
+
+Wren builds on Chromium and other third-party software, each under its
+own licence. Those licences, not this one, govern those components; their
+notices ship with every Wren release.
