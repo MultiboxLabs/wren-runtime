@@ -1,63 +1,73 @@
 # The UI a Wren browser provides
 
-A Wren app owns its windows and draws its browser UI; Chromium's browser layer
-runs inside it. This is every piece of UI a browser on Wren has, and for each
-one what the app does: **reuse Chromium's** (the app adds a button, names an
-anchor with `Wren_SetAnchor`, or makes a call), or **draw its own** (from a
-request, a state and its change kind). Many pieces offer both, chosen per
-request: Chromium asks before it opens one of its popovers (`on_popover`), and
-the app answers Chromium's, its own, or none.
+A Wren app owns its windows and draws its browser UI. Chromium's browser layer
+runs inside it. This page lists every piece of UI a browser on Wren has, and
+what the app does for each. It either reuses Chromium's or draws its own.
 
-Where a table says to name an anchor, an app with native UI names a view
-(`Wren_SetAnchor`), and one whose UI is a page in a web view names an element of
-that page (`Wren_SetAnchorElement`;
-[anchors in a web view](anchors-in-web-views.md)). Anchors have names, listed in
-`WrenToolbar.h`: the app names a view for each feature it has a button for
-("passwords", "zoom", "cast", ...), and the address field stands in for the
-rest. `Wren_GetAnchorState` says whether a bubble of Chromium's hangs off an
-anchor now, so the app draws its button pressed (`WREN_CHANGE_ANCHORS`).
+- **Reuse Chromium's.** The app adds a button, names an anchor with
+  `Wren_SetAnchor`, or makes a call. Chromium draws the rest.
+- **Draw its own.** The app reads a request or a state, and follows its change
+  kind.
+
+Many pieces offer both, chosen per request. Chromium asks before it opens one of
+its popovers, through `on_popover`. The app answers Chromium's, its own, or
+none.
+
+Where a table says to name an anchor, an app with native UI names a view with
+`Wren_SetAnchor`. An app whose UI is a page in a web view names an element of
+that page with `Wren_SetAnchorElement`. See
+[anchors in a web view](anchors-in-web-views.md). `WrenToolbar.h` lists the
+anchors' names. The app names a view for each feature it has a button for, such
+as "passwords", "zoom" or "cast", and the address field stands in for the rest.
+`Wren_GetAnchorState` says whether one of Chromium's bubbles hangs off an anchor
+now, so the app can draw its button pressed. `WREN_CHANGE_ANCHORS` reports each
+change.
 
 The API is in
 [`Wren.h`](../include/Wren.h),
 [`WrenUI.h`](../include/WrenUI.h),
-[`WrenOmnibox.h`](../include/WrenOmnibox.h)
+[`WrenOmnibox.h`](../include/WrenOmnibox.h),
+[`WrenBookmarks.h`](../include/WrenBookmarks.h)
 and
-[`WrenSession.h`](../include/WrenSession.h);
-what this release does not do is in [This release](this-release.md). Wren's
+[`WrenSession.h`](../include/WrenSession.h).
+What this release does not do is in [This release](this-release.md). Wren's
 sample browser draws its own site panel, extensions panel and password prompts,
 and reuses Chromium's for the rest.
 
-The tables name the C functions. The Swift API has each under a Swift name:
-`Wren_GetSiteState` is `browser.siteState()`, `WREN_CHANGE_SITE` is
-`ChangeKind.site`. [Windows and tabs](windows-and-tabs.md) explains the first
-table at length.
+The tables name the C functions. The Swift API and the Rust crate have each
+under their own name. `Wren_GetSiteState` is `browser.siteState()` in Swift and
+`Browser::site_state` in Rust, and `WREN_CHANGE_SITE` is `ChangeKind.site` and
+`ChangeKind::Site`. Each Swift and Rust item's comment names its C function, so
+searching `wren-swift` or `wren-rust` for a C name finds its wrapper.
+[Windows and tabs](windows-and-tabs.md) explains the first table at length.
 
 ## The window and tabs
 
-The app draws all of these; there is nothing of Chromium's to reuse.
+The app draws all of these. There is nothing of Chromium's to reuse.
 
-| UI                                      | What the app does                                                                                                                                                                                                                                                                                                                                    | API                                                                                                           |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Tab strip                               | Draws the tabs, their titles, favicons, loading and pinning, and the New Tab button                                                                                                                                                                                                                                                                  | `Wren_GetTabCount`, `Wren_GetTabAt`, `Wren_GetTabState`, `Wren_NewTab`; `WREN_CHANGE_TABS`, `WREN_CHANGE_TAB` |
-| Tab views                               | Places each tab's view in its window, shows the active one, at a whole number of points each way: Chromium drops a fraction, which leaves a one-pixel strip at the view's bottom or right edge                                                                                                                                                       | `Wren_GetTabView`, `Wren_AttachBrowserToView`, `Wren_FocusTab`                                                |
-| Crashed tab                             | Draws its own "Aw, snap!" over the tab, with a reload                                                                                                                                                                                                                                                                                                | `WrenTabState.crash`, `Wren_Reload`                                                                           |
-| Tab groups                              | Draws group labels and colours; menus to group and ungroup                                                                                                                                                                                                                                                                                           | `Wren_GroupTabs`, `Wren_SetTabGroupVisuals`; `WREN_CHANGE_GROUP`                                              |
-| Split tabs                              | Lays out both sides and draws the divider                                                                                                                                                                                                                                                                                                            | `Wren_SplitTabs`, `Wren_SetSplitRatio`; `WREN_CHANGE_SPLIT`                                                   |
-| Side panels                             | Places the side panel view, at the width Chromium remembers, and draws its own resize handle; Chromium puts each panel's page in it                                                                                                                                                                                                                  | `Wren_GetSidePanelView`, `Wren_ShowSidePanel`, `Wren_SetSidePanelWidth`; `WREN_CHANGE_SIDE_PANEL`             |
-| Status bubble                           | Draws Chrome's bubble at the bottom left of a page, or leaves it out: the address of the link under the pointer, or what a loading page waits for. Chrome shows it 80 ms after the text comes and fades it 250 ms after it goes, a third of the page wide with the address elided, growing to fit after 1.6 s, and moves it out of the pointer's way | `WrenTabState.status`, `Wren_CopyTabStatusText`; `WREN_TAB_FIELD_STATUS`                                      |
-| Popups and other windows Chromium opens | Shows each in a window of its own with the parts Chrome gives that kind: a page's popup gets its address, read-only; an extension's popup window gets none                                                                                                                                                                                           | `on_browser_opened`, `Wren_GetBrowserType`, `Wren_GetWindowFeatures`, `Wren_GetRequestedBounds`               |
-| DevTools                                | Nothing: docked DevTools is part of the tab's view; undocked it is a Browser of its own                                                                                                                                                                                                                                                              | `Wren_OpenDevTools`; `on_browser_opened`                                                                      |
-| Menus and commands                      | Uses Wren's default menu, Chrome's (`WREN_MENU_CHROMIUM`), or its own                                                                                                                                                                                                                                                                                | `WrenStartup.menu`                                                                                            |
-| Browser-modal dialogs                   | Blocks its own UI while one is open, as Chrome blocks its window                                                                                                                                                                                                                                                                                     | `Wren_HasModalDialog`; `WREN_CHANGE_MODAL_DIALOG`                                                             |
-| Restoring the last session              | Asks for it when it wants its windows and tabs back (at launch, from a button, or never); each window arrives as a Browser to show, with the frame it had                                                                                                                                                                                            | `Wren_GetLastSession`, `Wren_RestoreLastSession`; `on_browser_opened`, `Wren_GetRequestedBounds`              |
-| Reopen Closed Tab                       | Adds the menu item or button, enabled while Chromium has something to reopen                                                                                                                                                                                                                                                                         | `Wren_CanReopenClosedTab`, `Wren_ReopenClosedTab`; `WREN_CHANGE_CLOSED_TABS`                                  |
-| Full screen                             | Takes its window in and out of full screen when Chromium asks (a page, Escape), reports the window's changes, and shows only the page while one is in full screen; Chromium shows its "Press Esc" notice over the page                                                                                                                               | `on_fullscreen`, `Wren_SetFullscreen`, `Wren_GetFullscreenTab`; `WREN_CHANGE_FULLSCREEN`                      |
+| UI                                      | What the app does                                                                                                                                                                                                                                                                                                                                    | API                                                                                                                                                                            |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tab strip                               | Draws the tabs, their titles, favicons, loading and pinning, and the New Tab button                                                                                                                                                                                                                                                                  | `Wren_GetTabCount`, `Wren_GetTabAt`, `Wren_GetTabState`, `Wren_NewTab`; `WREN_CHANGE_TABS`, `WREN_CHANGE_TAB`                                                                  |
+| Tab views                               | Places each tab's view in its window, shows the active one, at a whole number of points each way: Chromium drops a fraction, which leaves a one-pixel strip at the view's bottom or right edge                                                                                                                                                       | `Wren_GetTabView`, `Wren_AttachBrowserToView`, `Wren_FocusTab`                                                                                                                 |
+| Crashed tab                             | Draws its own "Aw, snap!" over the tab, with a reload                                                                                                                                                                                                                                                                                                | `WrenTabState.crash`, `Wren_Reload`                                                                                                                                            |
+| Tab groups                              | Draws group labels and colours; menus to group and ungroup                                                                                                                                                                                                                                                                                           | `Wren_GroupTabs`, `Wren_SetTabGroupVisuals`; `WREN_CHANGE_GROUP`                                                                                                               |
+| Split tabs                              | Lays out both sides and draws the divider                                                                                                                                                                                                                                                                                                            | `Wren_SplitTabs`, `Wren_SetSplitRatio`; `WREN_CHANGE_SPLIT`                                                                                                                    |
+| Side panels                             | Places the side panel view, at the width Chromium remembers, and draws its own resize handle; Chromium puts each panel's page in it                                                                                                                                                                                                                  | `Wren_GetSidePanelView`, `Wren_ShowSidePanel`, `Wren_SetSidePanelWidth`; `WREN_CHANGE_SIDE_PANEL`                                                                              |
+| Status bubble                           | Draws Chrome's bubble at the bottom left of a page, or leaves it out: the address of the link under the pointer, or what a loading page waits for. Chrome shows it 80 ms after the text comes and fades it 250 ms after it goes, a third of the page wide with the address elided, growing to fit after 1.6 s, and moves it out of the pointer's way | `WrenTabState.status`, `Wren_CopyTabStatusText`; `WREN_TAB_FIELD_STATUS`                                                                                                       |
+| Popups and other windows Chromium opens | Shows each in a window of its own with the parts Chrome gives that kind: a page's popup gets its address, read-only; an extension's popup window gets none                                                                                                                                                                                           | `on_browser_opened`, `Wren_GetBrowserType`, `Wren_GetWindowFeatures`, `Wren_GetRequestedBounds`                                                                                |
+| DevTools                                | Nothing: docked DevTools is part of the tab's view; undocked it is a Browser of its own                                                                                                                                                                                                                                                              | `Wren_OpenDevTools`; `on_browser_opened`                                                                                                                                       |
+| Menus and commands                      | Uses Wren's default menu, Chrome's (`WREN_MENU_CHROMIUM`), or its own                                                                                                                                                                                                                                                                                | `WrenStartup.menu`                                                                                                                                                             |
+| Browser-modal dialogs                   | Blocks its own UI while one is open, as Chrome blocks its window                                                                                                                                                                                                                                                                                     | `Wren_HasModalDialog`; `WREN_CHANGE_MODAL_DIALOG`                                                                                                                              |
+| Restoring the last session              | Asks for it when it wants its windows and tabs back (at launch, from a button, or never); each window arrives as a Browser to show, with the frame it had                                                                                                                                                                                            | `Wren_GetLastSession`, `Wren_RestoreLastSession`; `on_browser_opened`, `Wren_GetRequestedBounds`                                                                               |
+| Bookmarks bar and folders               | Draws the Profile's bookmarks bar (the bar folder's items, its folders as menus) and whatever else of Chrome's bookmark manager it offers: adding, renaming, moving and removing; keeps folders of its own by their saved IDs; opens a bookmark as Chrome's bar does. Chromium's own bar is not shown                                                | `Wren_GetBookmarksState`, `Wren_GetBookmarkChildAt`, `Wren_GetBookmarkItem`, `Wren_AddBookmarkItem`, `Wren_MoveBookmarkItem`, `Wren_OpenBookmarkItem`; `WREN_CHANGE_BOOKMARKS` |
+| Reopen Closed Tab                       | Adds the menu item or button, enabled while Chromium has something to reopen                                                                                                                                                                                                                                                                         | `Wren_CanReopenClosedTab`, `Wren_ReopenClosedTab`; `WREN_CHANGE_CLOSED_TABS`                                                                                                   |
+| Full screen                             | Takes its window in and out of full screen when Chromium asks (a page, Escape), reports the window's changes, and shows only the page while one is in full screen; Chromium shows its "Press Esc" notice over the page                                                                                                                               | `on_fullscreen`, `Wren_SetFullscreen`, `Wren_GetFullscreenTab`; `WREN_CHANGE_FULLSCREEN`                                                                                       |
 
 ### A window drawn in HTML
 
 A window whose UI is one [web view](web-views.md)'s page has the rows above,
-drawn by the page from what the app sends it, and these of its own.
-[A browser drawn in HTML](html-browser.md) goes through it:
+drawn by the page from what the app sends it. It also has these of its own.
+[A browser drawn in HTML](html-browser.md) goes through them.
 
 | UI                                          | What the app does                                                                                                                   | API                                                                  |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -85,11 +95,16 @@ drawn by the page from what the app sends it, and these of its own.
 
 ## Popovers
 
-Each asks `on_popover` first, whatever opened it. Answer `WREN_POPOVER_CHROMIUM`
-(also with no handler) for Chromium's, at the anchor named; `WREN_POPOVER_APP`
-to draw your own from the data; `WREN_POPOVER_NONE` for nothing. A request the
-app takes stays open until `Wren_ClosePopover`, or until Wren withdraws it
-(`WREN_CHANGE_POPOVER`).
+Each popover asks `on_popover` first, whatever opened it. The app answers one of
+three things.
+
+- `WREN_POPOVER_CHROMIUM` shows Chromium's, at the anchor named. It is also what
+  happens with no handler.
+- `WREN_POPOVER_APP` means the app draws its own from the data.
+- `WREN_POPOVER_NONE` shows nothing.
+
+A request the app takes stays open until `Wren_ClosePopover`, or until Wren
+withdraws it. `WREN_CHANGE_POPOVER` reports either.
 
 | Popover                                        | Asked when                                                                                                                 | Draw your own from                                                                                                                                                                                                                                                                                |
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -108,12 +123,12 @@ app takes stays open until `Wren_ClosePopover`, or until Wren withdraws it
 | Toast ("Link copied")                          | Chromium shows one: copying a link, adding to the reading list                                                             | The request's toast data (`WrenPopoverRequest.toast` names it; `Wren_GetToastState`, its icon, `Wren_PressToastButton`, its menu); Chromium closes it when its own would go. Chromium's hangs off the "toast" anchor. The app's own toasts (`Wren_ShowToast`) come the same way, named "Embedder" |
 
 The texts of every popover are Chrome's, in `WrenUnstableUI.h`, which may change
-in any release ([compatibility](compatibility.md)); everything in this table is
-in the core.
+in any release. See [compatibility](compatibility.md). Everything in this table
+is in the stable part of the API.
 
-Show an automatic request (`WREN_POPOVER_AUTOMATIC`) without taking focus.
-Inside `on_popover`, only decide: calls that change Browsers or tabs are refused
-until it returns.
+Show an automatic request, `WREN_POPOVER_AUTOMATIC`, without taking focus.
+Inside `on_popover`, only decide. Wren refuses calls that change Browsers or
+tabs until it returns.
 
 ## Extensions
 
@@ -127,8 +142,8 @@ until it returns.
 
 ## Chromium's own, to reuse
 
-These stand on their own and stay Chromium's: the app gives them a place, and
-nothing more. Attach every Browser you show (`Wren_AttachBrowserToView`) and
+These stand on their own and stay Chromium's. The app gives them a place, and
+nothing more. Attach every Browser you show with `Wren_AttachBrowserToView`, and
 name the anchors.
 
 - Dialogs and sheets: extension install and uninstall, the bookmark and address
@@ -136,19 +151,20 @@ name the anchors.
 - Device choosers (USB, HID, serial, Bluetooth), passkeys and WebAuthn, HTTP
   authentication, a page's alerts and confirms.
 - The prompts of a page's `<permission>` elements.
-- The find bar, unless you draw your own: below the right end of the
+- The find bar, unless you draw your own. It hangs below the right end of the
   `"address-field"` anchor, or at the page's top right without one.
-- The download bubble, unless you draw your own: below the `"downloads"` anchor,
-  else the `"address-field"` one. Chrome's prompts before an off-the-record
-  Profile's last Browser closes, or the app quits, with downloads in progress,
-  unless `on_downloads_prompt` answers the app's: ask yourself and answer with
-  `Wren_AnswerDownloadsPrompt`.
-- The download button: Chrome has one in its toolbar; draw yours from
-  `Wren_GetDownloadButtonState` (shown or not, its icon, the progress ring,
-  active), name it `"downloads"`, and click it with `Wren_ClickDownloadButton`.
+- The download bubble, unless you draw your own. It hangs below the
+  `"downloads"` anchor, or else the `"address-field"` one.
+- Chrome's prompts about downloads in progress, before an off-the-record
+  Profile's last Browser closes or the app quits. To ask yourself, answer the
+  app's in `on_downloads_prompt`, then answer with `Wren_AnswerDownloadsPrompt`.
+- Chrome's download button belongs to its toolbar. Draw yours from
+  `Wren_GetDownloadButtonState`, which says whether it shows, its icon, its
+  progress ring, and whether it is active. Name it `"downloads"`, and click it
+  with `Wren_ClickDownloadButton`.
 
 ## Not available yet
 
-Infobars (page info's reload offer among them: the site state's `reload_needed`
-stands in for it), Lens, print and the other Chrome commands Wren disables. See
-[This release](this-release.md).
+Infobars are not available. That includes page info's offer to reload, for which
+the site state's `reload_needed` stands in. Neither are Lens's overlay and the
+Chrome commands Wren disables. See [This release](this-release.md).

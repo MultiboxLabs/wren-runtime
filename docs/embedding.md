@@ -1,22 +1,25 @@
 # Adding web pages to an existing app
 
 Wren is not only for browsers. An app that wants a web page somewhere in its UI
-(a help window, a sign-in page, a dashboard, a whole pane written in HTML) can
-use it for that and nothing more. Your app stays a native app: its windows, its
-views and its menus are still yours, and a page is one more view among them.
+can use Wren for that and nothing more. The page might be a help window, a
+sign-in page, a dashboard, or a whole pane written in HTML. Your app stays a
+native app. Its windows, its views and its menus are still yours, and a page is
+one more view among them.
 
-This is the alternative to moving the app into Electron, or to `WKWebView` when
-you need Chromium: its rendering, its DevTools, its extensions.
+Wren is the alternative to moving the app into Electron. It is also the
+alternative to `WKWebView` when you need Chromium's rendering, DevTools or
+extensions. The code here is in Swift. The same calls in Rust have the same
+names in Rust's case, and each item's comment in the crate names its C function.
 
 ## What changes in your app
 
-Four things, and the first is the one that matters.
+Four things change, and the first is the one that matters.
 
 ### 1. Chromium runs the event loop
 
 Chromium has to start before `NSApplication` does, and it runs the event loop
 itself. So the app's entry point becomes `WrenApp.run`, in place of
-`NSApplicationMain` or SwiftUI's `@main` `App`:
+`NSApplicationMain` or SwiftUI's `@main` `App`. In Rust it is `wren::run`.
 
 ```swift
 // main.swift
@@ -32,36 +35,47 @@ exit(WrenApp.run(startup, delegate) == .normal ? 0 : 1)
 ```
 
 What you did in `applicationDidFinishLaunching` moves to `ready`. The events an
-app delegate usually handles arrive as Wren's callbacks: `reopen` for a Dock
-click, `openURLs` for URLs and files, `willQuit` for termination. Windows, view
-controllers and SwiftUI views (in `NSHostingView`) work as before.
+app delegate usually handles arrive as Wren's callbacks: `reopen` for a click on
+the Dock icon, `openURLs` for URLs and files, and `willQuit` for termination.
+Windows, view controllers, and SwiftUI views in `NSHostingView` work as before.
 
 A SwiftUI app built on `App` and `Scene` needs an AppKit entry point and windows
-first; its views carry over.
+first. Its views carry over.
 
 ### 2. The app is bundled by `wren bundle`
 
 Chromium needs its framework and helper apps inside your bundle, signed together
 with it. [`wren bundle`](wren-cli.md) makes that bundle from your compiled
-executable and a short manifest, which also names the Wren release the app uses
-(`wren install` links it into the project), so the app is built as an executable
-(with SwiftPM, or any build system that makes one) and bundled afterwards.
-Bundling from inside an Xcode app target has not been tried.
+executable and a short manifest. The manifest also names the Wren release the
+app uses, which `wren install` links into the project. So the app is built as an
+executable, with SwiftPM, Cargo or any build system that makes one, and bundled
+afterwards. Bundling from inside an Xcode app target has not been tried.
 
-The framework is large: a few hundred megabytes in every app, as with Electron.
+The framework is large, a few hundred megabytes in every app, as with Electron.
 
 ### 3. A data directory
 
-Chromium keeps a Profile on disk even if you never show a browser: cookies,
-caches, local storage. Give it a folder under Application Support
-(`Startup.userDataDirectory`), and note that only one running process may use a
-folder. See [Startup](startup.md).
+Chromium keeps a Profile on disk even if you never show a browser, with its
+cookies, caches and local storage. Give it a folder under Application Support,
+in `Startup.userDataDirectory`. Only one process at a time may use a folder. See
+[Startup](startup.md).
 
 ### 4. Popups need an answer
 
 `browserOpened` is required because a page can call `window.open`. An app that
 is not a browser usually closes what arrives, as above, or opens the address in
 the user's own browser.
+
+DevTools arrives there too. `openDevTools()` on a web view makes a `.devtools`
+Browser, and an app that closes everything closes DevTools as it opens. To
+inspect your pages, show that Browser in a window instead. See
+[Windows and tabs](windows-and-tabs.md#windows-chromium-opens).
+
+```swift
+var delegate = AppDelegate(browserOpened: { browser, type, _ in
+    if type == .devtools { showInWindow(browser) } else { try? browser.close() }
+})
+```
 
 ## Two kinds of page
 
@@ -72,20 +86,23 @@ the user's own browser.
 | Needs a Browser                                           | No                      | Yes                   |
 | Dialogs, permission prompts, file choosers, `window.open` | No                      | Yes, Chromium's       |
 | History, sessions, extensions on the page                 | No                      | Yes                   |
-| Told when it loads, its title, its address                | No                      | Yes (`changed`)       |
+| Told when it loads, fails or crashes                      | Yes (`webView.changed`) | Yes (`changed`)       |
+| Told its title and address                                | No                      | Yes (`changed`)       |
+| Messages between the page and your app                    | Yes (`wren`)            | No                    |
 | DevTools                                                  | In a window of its own  | Docked or in a window |
 
-**Use a web view for pages you wrote.** It is the lighter thing, it needs
-nothing else, and what it lacks is what your own UI does not want.
+Use a web view for pages you wrote. It is the lighter thing, and it needs
+nothing else. What it lacks is what your own UI does not want.
 
-**Use a tab for the open web.** A site may ask for a permission, open a file
-chooser, show an alert or sign in through a popup, and only a tab has Chromium's
-UI for those.
+Use a tab for the open web. A site may ask for a permission, open a file
+chooser, show an alert, or sign in through a popup. Only a tab has Chromium's UI
+for those.
 
 ## Your own pages in a web view
 
 Serve the pages from your app with a [URL scheme](schemes.md), and show them in
-a [web view](web-views.md):
+a [web view](web-views.md). In Rust the handler is
+`MainThread::set_scheme_handler`.
 
 ```swift
 let pages = Bundle.main.resourceURL!.appendingPathComponent("Pages")
@@ -121,11 +138,14 @@ func showHelp() {
 Put the `Pages` folder in the bundle with the manifest's
 [`resources`](wren-cli.md#the-manifest).
 
-The page and your app can talk in one direction today: the page calls
-`fetch("app://help/api/…")` and your scheme handler answers, with JSON or
-anything else. A handler may answer later, so it can do real work first. There
-is no call from your app into the page yet, and the handler does not see a
-request's body.
+The page and your app can talk in two ways.
+
+- **Messages.** Make the web view with `messages: true`. The page calls your app
+  with `wren.invoke`, and your app sends to the page with `send`. See
+  [Messages between a page and your app](messages.md).
+- **Your scheme.** The page calls `fetch("app://help/api/…")`, and your scheme
+  handler answers with JSON or anything else. A handler may answer later, so it
+  can do real work first. It does not see a request's body.
 
 ## A website in a tab
 
@@ -148,22 +168,22 @@ func showSite(_ address: String, in container: NSView) {
 ```
 
 `container` must already be in a window. Follow `changed` for the page's title,
-address and loading state, and for `.tabs` if the site may open links in new
-tabs ([Windows and tabs](windows-and-tabs.md)).
+address and loading state. Follow `.tabs` too if the site may open links in new
+tabs. See [Windows and tabs](windows-and-tabs.md).
 
-Give each kind of use its own Profile if their data should not mix: a sign-in
-page in an ephemeral Profile leaves nothing behind
-(`WrenApp.createEphemeralProfile`).
+If the data of two uses should not mix, give each its own Profile. A sign-in
+page in an ephemeral Profile, from `WrenApp.createEphemeralProfile`, leaves
+nothing behind.
 
 ## What to know before you commit
 
-- **macOS on Apple silicon only**, for now.
-- **Your app carries Chromium**, and starts it at launch. There is no way yet to
+- **macOS on Apple silicon only,** for now.
+- **Your app carries Chromium,** and starts it at launch. There is no way yet to
   start Chromium later, on first use.
 - **A crash in Chromium's browser code takes the app with it.** Pages run in
-  their own processes and do not.
-- **Pre-1.0.** The API still changes between releases, and an app must be built
-  and bundled with the same one.
+  their own processes, and a crashed page does not.
+- **Wren is before 1.0.** The API still changes between releases, and an app
+  must be built and bundled with the same one.
 
 The current gaps, for web views in particular, are listed at the end of
 [Web views](web-views.md) and in [This release](this-release.md).

@@ -2,13 +2,14 @@
 // Use of this source code requires permission from Multibox Labs; see the
 // LICENSE file.
 
-// Wren: menus the app describes as data (C API). Wren.h includes this
-// header; see Wren.h for threading and handles.
+// Wren: menus the app describes as data (C API). Wren.h includes this header.
+// Wren.h also explains threads and handles.
 //
-// A menu is an array of WrenMenuItem that Wren copies, with submenus as
-// arrays of their own. Wren shows it natively and tells the app which of
-// its items was chosen, by the ID the app gave it. A main menu may also
-// hold the system's items (ROLE) and Chromium's commands (CHROMIUM).
+// The app describes a menu as an array of WrenMenuItem, and each submenu as an
+// array of its own. Wren copies the arrays and shows the menu natively. When
+// the user chooses one of the app's items, Wren reports the ID the app gave
+// it. A main menu may also hold the system's items (ROLE) and Chromium's
+// commands (CHROMIUM).
 
 #ifndef WREN_PUBLIC_WREN_MENUS_H_
 #define WREN_PUBLIC_WREN_MENUS_H_
@@ -20,28 +21,39 @@ extern "C" {
 #endif
 
 typedef enum WrenMenuItemKind {
-  // The app's own: reported by its ID when chosen.
+  // The app's own item. Wren reports its ID when the user chooses it.
   WREN_MENU_ITEM_APP = 0,
+
   WREN_MENU_ITEM_SEPARATOR = 1,
   WREN_MENU_ITEM_SUBMENU = 2,
-  // Main menu only: what the system does (`role`), such as Copy or Quit.
+  // Main menu only. Does what the system does for `role`, such as Copy or
+  // Quit.
   WREN_MENU_ITEM_ROLE = 3,
-  // Main menu only: a Chromium command (`command`) for the Browser in the
-  // key window. Wren enables it as Chrome enables its own; with no
-  // Browser in the key window it is off.
+  // Main menu only. Runs the Chromium command `command` for the Browser in
+  // the key window. Wren enables it when Chrome would enable its own. With no
+  // Browser in the key window, it is disabled.
   WREN_MENU_ITEM_CHROMIUM = 4,
 } WrenMenuItemKind;
 
 // What a ROLE item does, or which of the system's menus a SUBMENU is.
 typedef enum WrenMenuRole {
   WREN_MENU_ROLE_NONE = 0,
-  // The standard About panel.
+  // Shows the standard About panel.
   WREN_MENU_ROLE_ABOUT = 1,
+
   WREN_MENU_ROLE_HIDE = 2,
   WREN_MENU_ROLE_HIDE_OTHERS = 3,
   WREN_MENU_ROLE_SHOW_ALL = 4,
+  // Quits the app as Chrome's Quit item does. It sends NSApp terminate:,
+  // which Chromium handles. As with Wren_Quit, a page's beforeunload or
+  // downloads in progress can stop the quit.
+  //
+  // While Warn Before Quitting is on (Wren_GetQuitWarningState), its key
+  // warns first, as Chrome's does, and the app may show the warning itself
+  // (on_quit_prompt). A click on it never warns.
   WREN_MENU_ROLE_QUIT = 5,
-  // These act on the focused text: a page's field, or the app's own.
+  // The roles from UNDO to SELECT_ALL act on the focused text. That is a
+  // field in a page, or one of the app's own.
   WREN_MENU_ROLE_UNDO = 6,
   WREN_MENU_ROLE_REDO = 7,
   WREN_MENU_ROLE_CUT = 8,
@@ -50,7 +62,7 @@ typedef enum WrenMenuRole {
   WREN_MENU_ROLE_PASTE_AND_MATCH_STYLE = 11,
   WREN_MENU_ROLE_DELETE = 12,
   WREN_MENU_ROLE_SELECT_ALL = 13,
-  // These act on the key window.
+  // The roles from CLOSE_WINDOW to STOP_SPEAKING act on the key window.
   WREN_MENU_ROLE_CLOSE_WINDOW = 14,
   WREN_MENU_ROLE_MINIMIZE = 15,
   WREN_MENU_ROLE_ZOOM = 16,
@@ -58,35 +70,39 @@ typedef enum WrenMenuRole {
   WREN_MENU_ROLE_BRING_ALL_TO_FRONT = 18,
   WREN_MENU_ROLE_START_SPEAKING = 19,
   WREN_MENU_ROLE_STOP_SPEAKING = 20,
-  // SUBMENU only: the menus the system fills or searches. SERVICES is
-  // given no items; WINDOW lists the app's windows after its own items;
-  // HELP gets the system's search field.
+  // SUBMENU only. These are the menus the system fills or searches.
+  //
+  // - SERVICES takes no items of the app's.
+  // - WINDOW lists the app's windows after the app's own items.
+  // - HELP gets the system's search field.
   WREN_MENU_ROLE_SERVICES = 21,
   WREN_MENU_ROLE_WINDOW = 22,
   WREN_MENU_ROLE_HELP = 23,
 } WrenMenuRole;
 
-// A Chromium command for a CHROMIUM item: Chrome's own main menu's, for
-// one Browser. Commands that open a Browser of Chromium's (New Window) are
-// not here: the app makes its Browsers.
+// A Chromium command for a CHROMIUM item. These are the commands of Chrome's
+// own main menu that act on one Browser. Commands that open a Browser, such as
+// New Window, are left out, because the app makes its own Browsers.
 typedef enum WrenChromiumCommand {
   WREN_CHROMIUM_COMMAND_NONE = 0,
-  // Tabs.
+  // Commands on tabs.
   WREN_CHROMIUM_COMMAND_NEW_TAB = 1,
   WREN_CHROMIUM_COMMAND_NEW_TAB_TO_RIGHT = 2,
   WREN_CHROMIUM_COMMAND_CLOSE_TAB = 3,
   WREN_CHROMIUM_COMMAND_REOPEN_CLOSED_TAB = 4,
   WREN_CHROMIUM_COMMAND_DUPLICATE_TAB = 5,
-  // Pin, mute and group the active tab; checked while it is.
+  // These pin, mute or group the active tab. Each is checked while the tab
+  // is pinned, muted or grouped.
   WREN_CHROMIUM_COMMAND_PIN_TAB = 6,
   WREN_CHROMIUM_COMMAND_MUTE_SITE = 7,
   WREN_CHROMIUM_COMMAND_GROUP_TAB = 8,
+  // More commands on tabs.
   WREN_CHROMIUM_COMMAND_SELECT_NEXT_TAB = 9,
   WREN_CHROMIUM_COMMAND_SELECT_PREVIOUS_TAB = 10,
   WREN_CHROMIUM_COMMAND_CLOSE_OTHER_TABS = 11,
   WREN_CHROMIUM_COMMAND_CLOSE_TABS_TO_RIGHT = 12,
   WREN_CHROMIUM_COMMAND_NEW_SPLIT_TAB = 13,
-  // The active tab's page.
+  // Commands on the active tab's page.
   WREN_CHROMIUM_COMMAND_BACK = 14,
   WREN_CHROMIUM_COMMAND_FORWARD = 15,
   WREN_CHROMIUM_COMMAND_RELOAD = 16,
@@ -98,23 +114,24 @@ typedef enum WrenChromiumCommand {
   WREN_CHROMIUM_COMMAND_ZOOM_OUT = 22,
   WREN_CHROMIUM_COMMAND_BOOKMARK_THIS_TAB = 23,
   WREN_CHROMIUM_COMMAND_VIEW_SOURCE = 24,
-  // Opens DevTools, or closes it where it is open.
+  // Opens DevTools, or closes it if it is open.
   WREN_CHROMIUM_COMMAND_DEVELOPER_TOOLS = 25,
+
   WREN_CHROMIUM_COMMAND_JAVASCRIPT_CONSOLE = 26,
   WREN_CHROMIUM_COMMAND_INSPECT_ELEMENTS = 27,
-  // Chromium's own pages, in a new tab.
+  // These open Chromium's own pages in a new tab.
   WREN_CHROMIUM_COMMAND_HISTORY = 28,
   WREN_CHROMIUM_COMMAND_DOWNLOADS = 29,
   WREN_CHROMIUM_COMMAND_BOOKMARK_MANAGER = 30,
   WREN_CHROMIUM_COMMAND_EXTENSIONS = 31,
   WREN_CHROMIUM_COMMAND_CLEAR_BROWSING_DATA = 32,
   WREN_CHROMIUM_COMMAND_TASK_MANAGER = 33,
-  // Cast…: opens Cast's dialog for the active tab, as Chrome's View menu
-  // does; disabled where Chrome disables it (Cast turned off by policy, a
-  // dialog open over the page).
+  // Cast…, as in Chrome's View menu. Opens Cast's dialog for the active tab.
+  // It is disabled where Chrome disables it, such as when policy turns Cast
+  // off or a dialog is open over the page.
   WREN_CHROMIUM_COMMAND_CAST = 34,
-  // Find…, Find Next and Find Previous, as in Chrome's Edit menu. Each
-  // opens a find (WREN_POPOVER_FIND); the next two also step it.
+  // Find…, Find Next and Find Previous, as in Chrome's Edit menu. Each opens
+  // a find (WREN_POPOVER_FIND). Find Next and Find Previous also step it.
   WREN_CHROMIUM_COMMAND_FIND = 35,
   WREN_CHROMIUM_COMMAND_FIND_NEXT = 36,
   WREN_CHROMIUM_COMMAND_FIND_PREVIOUS = 37,
@@ -124,74 +141,92 @@ typedef enum WrenChromiumCommand {
 typedef enum WrenMenuModifier {
   // Command on macOS, Control elsewhere.
   WREN_MENU_MODIFIER_PRIMARY = 1u << 0,
+
   WREN_MENU_MODIFIER_SHIFT = 1u << 1,
   // Option on macOS.
   WREN_MENU_MODIFIER_ALT = 1u << 2,
-  // Control on macOS, beside WREN_MENU_MODIFIER_PRIMARY.
+  // Control on macOS, as well as WREN_MENU_MODIFIER_PRIMARY.
   WREN_MENU_MODIFIER_CONTROL = 1u << 3,
 } WrenMenuModifier;
 
-// One item. Zero-filled fields are the default: enabled, unchecked, no key.
-// Strings are UTF-8. Fields an item's kind does not use are ignored.
+// One menu item. A zero-filled field means the default: enabled, unchecked
+// and no key. Strings are UTF-8. Wren ignores the fields an item's kind does
+// not use.
 typedef struct WrenMenuItem {
   WrenMenuItemKind kind;
-  // APP: required, unique in the menu, 1 to 256 bytes. Reported back as
-  // given when the item is chosen.
+  // Required for APP. 1 to 256 bytes, and unique in the menu. Wren reports it
+  // back, as given, when the user chooses the item.
   const char* id;
-  // APP and SUBMENU: required, shown as given. ROLE, CHROMIUM and a SUBMENU
-  // with a role: NULL takes the label the system's or Chrome's own menu
-  // gives it, in the user's language.
+  // Required for APP and SUBMENU, and shown as given. For ROLE, CHROMIUM and
+  // a SUBMENU with a role, NULL gives the label the system's or Chrome's own
+  // menu uses, in the user's language.
   const char* label;
   bool disabled;
-  // APP: shown with a check mark.
+  // APP only. Shows a check mark.
   bool checked;
-  // APP, ROLE and CHROMIUM: a key, as a page's KeyboardEvent.key names
-  // it: one character ("t", "[", "+") or a key's name ("Enter",
-  // "ArrowLeft", "F5"), with `modifiers`. An upper-case letter is the
-  // letter with Shift. NULL is no key for an APP item, and the system's or
-  // Chrome's own key for the others. A main menu's key runs its item,
-  // while a page has focus too; a context menu shows it beside the label
-  // and does not listen for it.
+  // APP only. The item is not shown. In a main menu its key still runs it,
+  // which gives a command shown by another item a second key.
+  bool hidden;
+  // APP, ROLE and CHROMIUM. A key, named as a page's KeyboardEvent.key names
+  // it, together with `modifiers`.
+  //
+  // - A key is one character, such as "t", "[" or "+", or a key's name, such
+  //   as "Enter", "ArrowLeft" or "F5".
+  // - An upper-case letter means the letter with Shift.
+  // - NULL means no key for an APP item. For ROLE and CHROMIUM it means the
+  //   key the system's or Chrome's own menu uses.
+  // - A main menu's key runs its item, even while a page has focus.
+  // - A context menu shows the key beside the label but does not listen for
+  //   it.
   const char* key;
   // WrenMenuModifier bits.
   uint32_t modifiers;
-  // SUBMENU: its items; NULL with a count of 0 is an empty submenu.
+  // SUBMENU only. Its items. NULL with a count of 0 makes an empty submenu.
   const struct WrenMenuItem* submenu;
   size_t submenu_count;
-  // ROLE: what it does, ABOUT to STOP_SPEAKING. SUBMENU: NONE, or one of
-  // SERVICES, WINDOW and HELP.
+  // For ROLE, what the item does, from ABOUT to STOP_SPEAKING. For SUBMENU,
+  // NONE, or one of SERVICES, WINDOW and HELP.
   WrenMenuRole role;
-  // CHROMIUM.
+  // CHROMIUM only.
   WrenChromiumCommand command;
 } WrenMenuItem;
 
 // --- Context menus ----------------------------------------------------------
 
-// A context menu closed. `chosen_id` is the chosen APP item's ID, valid
-// during the call, or NULL if none was chosen: the user dismissed it,
-// another context menu replaced it, or its page went away.
+// Runs when a context menu has closed. `chosen_id` is the ID of the APP item
+// the user chose, valid only during the call. It is NULL if the user chose
+// nothing: they dismissed the menu, another context menu replaced it, or its
+// page went away.
 typedef void (*WrenMenuCallback)(void* context, const char* chosen_id);
 
 // Shows `items` as a native context menu at (x, y), in points from the top
-// left of `view`: one of the app's views in a window (an NSView on macOS),
-// such as a web view's (Wren_GetWebViewNativeView), a tab's
-// (Wren_GetTabView) or the app's own. Over a web view's or a tab's view the
-// menu belongs to its page, as Chrome's page menu does, so the system's own
-// items (Services) see the page; a page's clientX and clientY are the point
-// at 100% zoom.
+// left of `view`.
 //
-// Returns at once; the menu opens from the event loop. `callback` runs
-// once, from the event loop, after the menu closed and after the chosen
-// item, if any, was reported. One context menu is shown at a time: a second
-// call closes the first, whose callback reports NULL. If the web view is
-// destroyed or the tab closes while the menu is up, it closes and reports
-// NULL.
+// `view` is one of the app's views in a window, an NSView on macOS. It may be
+// a web view's view (Wren_GetWebViewNativeView), a tab's view
+// (Wren_GetTabView), or a view of the app's own. Over a web view's or a tab's
+// view, the menu belongs to the page, as Chrome's page menu does. So the
+// system's own items, such as Services, act on the page. A page's clientX and
+// clientY are the point at 100% zoom.
 //
-// WREN_ERROR_INVALID_ARGUMENT, and `callback` does not run, for a view in no
-// window, no items, an item that breaks a rule above, an unknown kind, key
-// or modifier, submenus nested more than 4 deep, or more than 1,000 items.
-// ROLE and CHROMIUM items, and a SUBMENU with a role, are main menu only.
-// WREN_ERROR_NOT_ALLOWED inside on_popover or on_fullscreen.
+// The call returns at once, and the menu opens from the event loop.
+// `callback` runs once, from the event loop, after the menu has closed and
+// after Wren has reported the chosen item, if any.
+//
+// Only one context menu shows at a time. A second call closes the first, and
+// the first one's callback reports NULL. If the web view is destroyed or the
+// tab closes while the menu is open, the menu closes and reports NULL.
+//
+// Returns WREN_ERROR_INVALID_ARGUMENT, and `callback` does not run, for any of
+// these:
+//
+// - a view in no window, or no items
+// - an item that breaks a rule above, or an unknown kind, key or modifier
+// - submenus nested more than 4 deep, or more than 1,000 items
+// - a ROLE or CHROMIUM item, or a SUBMENU with a role, which belong in the
+//   main menu only
+//
+// Returns WREN_ERROR_NOT_ALLOWED inside on_popover or on_fullscreen.
 WREN_API WrenResult Wren_ShowContextMenu(void* view,
                                          const WrenMenuItem* items,
                                          size_t count,
@@ -202,26 +237,32 @@ WREN_API WrenResult Wren_ShowContextMenu(void* view,
 
 // --- The main menu ----------------------------------------------------------
 
-// Makes `items` the app's main menu (the menu bar on macOS), in place of
-// the one Wren installed (WrenStartup.menu) or the last one set. Each item
-// is a SUBMENU; the first is the app's own menu, whose title the system
-// shows as the app's name. Copied. If a menu is open, the change waits
-// until it closes. When an APP item is chosen, by a click or its key,
-// on_menu_command runs. After this the app does not edit NSApp.mainMenu
-// itself.
+// Makes `items` the app's main menu, the menu bar on macOS. It replaces the
+// menu Wren installed (WrenStartup.menu), or the one set last.
 //
-// WREN_ERROR_INVALID_ARGUMENT for an item that is not a SUBMENU at the top,
-// or an item that breaks a rule of WrenMenuItem's or Wren_ShowContextMenu's
-// above; the menu stays as it was. WREN_ERROR_NOT_ALLOWED inside
-// on_popover or on_fullscreen.
+// Every item at the top is a SUBMENU. The first is the app's own menu, and the
+// system shows the app's name as its title. Wren copies the items. If a menu
+// is open, the change waits until it closes. When the user chooses an APP
+// item, by a click or by its key, on_menu_command runs.
+//
+// Once the app has called this, it should not edit NSApp.mainMenu itself.
+//
+// Returns WREN_ERROR_INVALID_ARGUMENT for an item at the top that is not a
+// SUBMENU, or an item that breaks a rule of WrenMenuItem or
+// Wren_ShowContextMenu. The menu then stays as it was. Returns
+// WREN_ERROR_NOT_ALLOWED inside on_popover or on_fullscreen.
 WREN_API WrenResult Wren_SetMainMenu(const WrenMenuItem* items, size_t count);
 
-// Changes the label, disabled, checked, key and modifiers of the main menu's
-// APP item `id` to `item`'s, an APP item with the same rules, in place: an
-// open menu shows the change the next time it opens. An app whose items
-// follow its state (enabled while a window allows them) calls this as that
-// state changes. WREN_ERROR_INVALID_ARGUMENT if no APP item of the menu
-// Wren_SetMainMenu set has this ID, or for a bad `item`.
+// Updates the main menu's APP item `id` in place. Its label, disabled,
+// checked, hidden, key and modifiers become those of `item`, which is an APP
+// item with the same rules. A menu that is open shows the change the next time
+// it opens.
+//
+// An app whose items follow its state calls this as the state changes, for
+// example to enable an item only while a window allows it.
+//
+// Returns WREN_ERROR_INVALID_ARGUMENT if no APP item of the menu
+// Wren_SetMainMenu set has this ID, or if `item` breaks a rule.
 WREN_API WrenResult Wren_UpdateMainMenuItem(const char* id,
                                             const WrenMenuItem* item);
 

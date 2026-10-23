@@ -2,26 +2,30 @@
 // Use of this source code requires permission from Multibox Labs; see the
 // LICENSE file.
 
-// Wren: downloads (C API). Wren.h includes this header; see Wren.h for
-// threading, handles and strings.
+// Wren: downloads (C API). Wren.h includes this header. Wren.h also explains
+// threads, handles and strings.
 //
-// Chromium downloads files as Chrome does: where its download settings say,
-// asking with its save panel when they say to (an off-the-record Profile
-// always asks), and warning about dangerous files. Chrome shows them from a
-// button in its toolbar and a bubble below it; here the app reads them as
-// state and draws them as it likes, or leaves the bubble to Chromium
-// (WREN_POPOVER_DOWNLOADS, WrenUI.h).
+// Chromium downloads files as Chrome does. It saves them where its download
+// settings say. When the settings say to ask, it asks with its save panel. An
+// off-the-record Profile always asks. It warns about dangerous files.
 //
-// - A Profile's downloads are Chrome's bubble's: those of the last 24 hours,
-//   at most 30, in progress first, then paused, then the rest, newest first.
-//   An off-the-record Profile's has its original's too, as Chrome's
-//   incognito windows do. chrome://downloads has the whole history.
-// - The download button is Chrome's, per Browser: whether Chrome shows it,
-//   its icon and its progress ring. Chromium decides, as for Chrome's.
+// Chrome shows downloads from a button in its toolbar and a bubble below it.
+// A Wren app reads them as state and draws them as it likes. It may also
+// leave the bubble to Chromium, through WREN_POPOVER_DOWNLOADS (WrenUI.h).
+//
+// - A Profile's downloads are the ones Chrome's bubble lists. That is those
+//   of the last 24 hours, at most 30. Downloads in progress come first, then
+//   paused ones, then the rest, newest first. chrome://downloads has the whole
+//   history.
+// - An off-the-record Profile's list also has its original Profile's
+//   downloads, as Chrome's incognito windows do.
+// - Each Browser has Chrome's download button: whether Chrome would show it,
+//   its icon and its progress ring. Chromium decides all of these, as it does
+//   for Chrome.
 // - Before a Browser closes, or the app quits, with downloads in progress
-//   that would be cancelled, on_downloads_prompt asks (Wren.h). On macOS a
-//   Browser asks only when it is the last of an off-the-record Profile: a
-//   normal Profile's downloads go on while the app runs.
+//   that would be cancelled, Wren asks on_downloads_prompt (Wren.h). On macOS
+//   a closing Browser asks only if it is the last Browser of an off-the-record
+//   Profile. A normal Profile's downloads go on for as long as the app runs.
 
 #ifndef WREN_PUBLIC_WREN_DOWNLOADS_H_
 #define WREN_PUBLIC_WREN_DOWNLOADS_H_
@@ -35,41 +39,46 @@ extern "C" {
 // --- Downloads --------------------------------------------------------------
 
 typedef enum WrenDownloadStatus {
-  // Downloading, or paused (WrenDownloadState.paused).
+  // Downloading, or paused. WrenDownloadState.paused says which.
   WREN_DOWNLOAD_IN_PROGRESS = 0,
+
   WREN_DOWNLOAD_DONE = 1,
   WREN_DOWNLOAD_CANCELLED = 2,
-  // It stopped with an error (WrenDownloadState.failure); it may be
-  // resumed or retried.
+  // Stopped with an error, given by WrenDownloadState.failure. The download
+  // may be resumed or retried.
   WREN_DOWNLOAD_FAILED = 3,
 } WrenDownloadStatus;
 
-// How Chrome warns about it, by the colour of its warning.
+// How Chrome warns about a download, named by the colour of its warning.
 typedef enum WrenDownloadWarning {
   WREN_DOWNLOAD_WARNING_NONE = 0,
-  // Red: a dangerous file, site or content. Chrome keeps it unless the user
-  // chooses to (WREN_DOWNLOAD_KEEP).
+  // Red. The file, the site or the content is dangerous. Chrome does not keep
+  // the file unless the user chooses to, with WREN_DOWNLOAD_KEEP.
   WREN_DOWNLOAD_WARNING_DANGEROUS = 1,
-  // Grey: uncommon, unverified, or insecure (http).
+  // Grey. The file is uncommon or unverified, or came over insecure http.
   WREN_DOWNLOAD_WARNING_SUSPICIOUS = 2,
 } WrenDownloadWarning;
 
 // Why a WREN_DOWNLOAD_FAILED download stopped.
 typedef enum WrenDownloadFailure {
   WREN_DOWNLOAD_FAILURE_NONE = 0,
-  // The file could not be written: no space, no permission, a name too long.
+  // The file could not be written. The disk may be full, the folder not
+  // writable, or the name too long.
   WREN_DOWNLOAD_FAILURE_FILE = 1,
+
   WREN_DOWNLOAD_FAILURE_NETWORK = 2,
-  // The server refused or ended it.
+  // The server refused the download or ended it.
   WREN_DOWNLOAD_FAILURE_SERVER = 3,
-  // Blocked: a virus, the administrator's policy, a failed security check.
+  // Something blocked it: a virus, the administrator's policy, or a failed
+  // security check.
   WREN_DOWNLOAD_FAILURE_BLOCKED = 4,
-  // The browser went away while it downloaded.
+  // The browser went away during the download.
   WREN_DOWNLOAD_FAILURE_CRASH = 5,
 } WrenDownloadFailure;
 
-// What may be done to a download now, as Chrome's bubble offers it. Bits of
-// WrenDownloadState.actions; Wren_DoDownloadAction takes one.
+// What the user may do to a download now, as Chrome's bubble offers it.
+// WrenDownloadState.actions holds these as bits. Wren_DoDownloadAction takes
+// one.
 typedef enum WrenDownloadAction {
   WREN_DOWNLOAD_PAUSE = 1u << 0,
   WREN_DOWNLOAD_RESUME = 1u << 1,
@@ -78,11 +87,13 @@ typedef enum WrenDownloadAction {
   WREN_DOWNLOAD_OPEN = 1u << 3,
   // Shows the file in the Finder.
   WREN_DOWNLOAD_SHOW_IN_FINDER = 1u << 4,
-  // Opens the file when it is done, or no longer; see open_when_done.
+  // Turns opening the file when it is done on, or off again. See
+  // open_when_done.
   WREN_DOWNLOAD_OPEN_WHEN_DONE = 1u << 5,
-  // Keeps a file Chrome warns about, or discards it (the file is deleted and
-  // the download leaves the list).
+  // Keeps a file Chrome warns about.
   WREN_DOWNLOAD_KEEP = 1u << 6,
+  // Discards a file Chrome warns about. The file is deleted and the download
+  // leaves the list.
   WREN_DOWNLOAD_DISCARD = 1u << 7,
   // Downloads a failed file again from the start.
   WREN_DOWNLOAD_RETRY = 1u << 8,
@@ -91,116 +102,132 @@ typedef enum WrenDownloadAction {
 typedef struct WrenDownloadState {
   WrenDownloadStatus status;
   bool paused;
-  // Bytes so far, and in all; 0 when the size is not known.
+  // The bytes received so far, and the total. Each is 0 when not known.
   int64_t received_bytes;
   int64_t total_bytes;
-  // Chromium's estimate of the time left, in whole seconds; -1 when it has
-  // none (paused, done, not started, an unknown size).
+  // Chromium's estimate of the time left, in whole seconds. -1 when it has
+  // none: paused, done, not started, or of unknown size.
   int64_t seconds_left;
+
   WrenDownloadWarning warning;
   WrenDownloadFailure failure;
-  // It opens when done (WREN_DOWNLOAD_OPEN_WHEN_DONE).
+  // True if the file opens when the download is done. See
+  // WREN_DOWNLOAD_OPEN_WHEN_DONE.
   bool open_when_done;
-  // Done, but its file has since been moved or deleted.
+  // True if the download is done but its file has since been moved or
+  // deleted.
   bool file_removed;
   // Bits of WrenDownloadAction.
   uint32_t actions;
-  // The tab that started it, or WREN_NO_TAB (a web view's page, a tab that
-  // has closed, one from a past session).
+  // The tab that started the download. WREN_NO_TAB if a web view's page
+  // started it, if the tab has closed, or if it is from a past session.
   WrenTabID tab;
 } WrenDownloadState;
 
-// The Profile's downloads (see above), in order. WREN_CHANGE_DOWNLOADS
-// reports changes to them, once the app has read them: one added or gone,
-// or one's progress or state.
+// The number of the Profile's downloads, as listed above, in order.
+//
+// Once the app has read them, WREN_CHANGE_DOWNLOADS reports each change: a
+// download added or gone, or a download's progress or state.
 WREN_API size_t Wren_GetDownloadCount(WrenProfile* profile);
-// WREN_NO_DOWNLOAD past the end.
+// The download at `index`. WREN_NO_DOWNLOAD past the end.
 WREN_API WrenDownloadID Wren_GetDownloadAt(WrenProfile* profile, size_t index);
 
-// WREN_ERROR_DOWNLOAD_UNAVAILABLE for a download Chromium no longer has
-// (discarded, or its Profile closed).
+// Returns WREN_ERROR_DOWNLOAD_UNAVAILABLE for a download Chromium no longer
+// has, because it was discarded or its Profile closed.
 WREN_API WrenResult Wren_GetDownloadState(WrenDownloadID download,
                                           WrenDownloadState* state);
-// The file's name, as Chrome shows it.
+// Copies the file's name, as Chrome shows it.
 WREN_API size_t Wren_CopyDownloadFileName(WrenDownloadID download,
                                           char* buffer,
                                           size_t size);
-// Where the file is, or will be once done; "" before Chromium has chosen.
+// Copies the file's path, where it is or where it will be once done. "" until
+// Chromium has chosen it.
 WREN_API size_t Wren_CopyDownloadPath(WrenDownloadID download,
                                       char* buffer,
                                       size_t size);
-// The URL it came from, after redirects.
+// Copies the URL the file came from, after redirects.
 WREN_API size_t Wren_CopyDownloadURL(WrenDownloadID download,
                                      char* buffer,
                                      size_t size);
 
-// Does what Chrome's bubble does for `action`. WREN_ERROR_NOT_ALLOWED when
-// it is not among the download's actions, and inside on_popover.
+// Does what Chrome's bubble does for `action`. Returns WREN_ERROR_NOT_ALLOWED
+// when `action` is not among the download's actions, and inside on_popover.
 WREN_API WrenResult Wren_DoDownloadAction(WrenDownloadID download,
                                           WrenDownloadAction action);
 
 // --- The download button ----------------------------------------------------
 
 typedef enum WrenDownloadIcon {
-  // Downloads in progress: Chrome's arrow with the ring.
+  // Downloads are in progress. Chrome shows its arrow with the ring.
   WREN_DOWNLOAD_ICON_PROGRESS = 0,
-  // None in progress: Chrome's plain download icon.
+  // None is in progress. Chrome shows its plain download icon.
   WREN_DOWNLOAD_ICON_DONE = 1,
-  // A file is being scanned: the ring spins.
+  // A file is being scanned. The ring spins.
   WREN_DOWNLOAD_ICON_SCANNING = 2,
 } WrenDownloadIcon;
 
 typedef struct WrenDownloadButtonState {
-  // Chrome shows its button: from a download's start until an hour after the
-  // last ended.
+  // True while Chrome would show its button. That is from the start of a
+  // download until an hour after the last one ended.
   bool visible;
-  // Drawn in the accent colour: something new for a minute after a download
-  // ends, until the button is clicked, or while one downloads unpaused.
+  // True while Chrome draws the button in the accent colour. That is while a
+  // download runs unpaused, and for a minute after a download ends, unless
+  // the button is clicked first.
   bool active;
+
   WrenDownloadIcon icon;
-  // The downloads in progress, and their progress together, 0 to 100.
+  // The number of downloads in progress, and their progress together, from 0
+  // to 100.
   int in_progress;
   int percent;
-  // All their sizes are known; otherwise the ring spins.
+  // True if the sizes of all of them are known. If not, the ring spins.
   bool percent_known;
 } WrenDownloadButtonState;
 
-// The Browser's download button, as Chrome's toolbar would show it.
-// WREN_CHANGE_DOWNLOAD_BUTTON reports its changes, once the app has read
-// it.
+// Reads the Browser's download button, as Chrome's toolbar would show it.
+// Once the app has read it, WREN_CHANGE_DOWNLOAD_BUTTON reports each change.
 WREN_API WrenResult Wren_GetDownloadButtonState(WrenBrowser* browser,
                                                 WrenDownloadButtonState* state);
-// As a click on Chrome's button: opens the bubble of the Browser's downloads
-// (WREN_POPOVER_DOWNLOADS asks whose), or closes Chromium's if it is open;
-// with none to list, chrome://downloads in a tab. The button is no longer
-// active. WREN_ERROR_NOT_ALLOWED inside on_popover.
+// Does what a click on Chrome's button does.
+//
+// It opens the bubble of the Browser's downloads, and WREN_POPOVER_DOWNLOADS
+// asks whether the bubble is Chromium's or the app's. If Chromium's bubble is
+// open, it closes it. With no downloads to list, it opens chrome://downloads
+// in a tab. After the click the button is no longer active.
+//
+// Returns WREN_ERROR_NOT_ALLOWED inside on_popover.
 WREN_API WrenResult Wren_ClickDownloadButton(WrenBrowser* browser);
 
 // --- Closing and quitting with downloads in progress ------------------------
 
 typedef enum WrenDownloadsPromptKind {
-  // The app is quitting: Wren_Quit, Cmd-Q, logging out.
+  // The app is quitting, through Wren_Quit, Cmd-Q or logging out.
   WREN_DOWNLOADS_PROMPT_QUIT = 0,
-  // `browser`, the last Browser of the off-the-record `profile`, is closing.
+  // `browser` is closing, and it is the last Browser of the off-the-record
+  // `profile`.
   WREN_DOWNLOADS_PROMPT_CLOSE = 1,
 } WrenDownloadsPromptKind;
 
-// What Chromium is about to ask. Valid during on_downloads_prompt.
+// What Chromium is about to ask. Valid only during on_downloads_prompt.
 struct WrenDownloadsPrompt {
   WrenDownloadsPromptID prompt;
   WrenDownloadsPromptKind kind;
-  // CLOSE: the Browser, and its Profile. Borrowed.
+  // For WREN_DOWNLOADS_PROMPT_CLOSE, the Browser and its Profile. Borrowed.
   WrenBrowser* browser;
   WrenProfile* profile;
-  // The downloads that would be cancelled.
+  // The number of downloads that would be cancelled.
   int count;
 };
 
-// The app's answer to a prompt it answered WREN_POPOVER_APP: cancel the
-// downloads and go on closing or quitting, or keep them, and the Browser or
-// the app. Keeping them at a close shows chrome://downloads in the Browser,
-// as Chrome does. WREN_ERROR_POPOVER_CLOSED for a prompt answered already,
-// or whose Browser has closed.
+// Answers a prompt for which the app answered WREN_POPOVER_APP.
+//
+// With `cancel_downloads`, Chromium cancels the downloads and goes on closing
+// or quitting. Without it, the downloads go on, and so does the Browser or the
+// app. Keeping the downloads at a close shows chrome://downloads in the
+// Browser, as Chrome does.
+//
+// Returns WREN_ERROR_POPOVER_CLOSED for a prompt already answered, or whose
+// Browser has closed.
 WREN_API WrenResult Wren_AnswerDownloadsPrompt(WrenDownloadsPromptID prompt,
                                                bool cancel_downloads);
 
