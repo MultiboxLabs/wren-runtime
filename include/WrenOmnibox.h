@@ -65,6 +65,12 @@ typedef enum WrenLocationText {
   // tab is loading because the user asked for it. "about:blank" while
   // show_url is false.
   WREN_LOCATION_TEXT_URL = 3,
+  // The default search engine's keyword, such as "google.com", and its name
+  // for the chip, such as "Google", as a suggestion's keyword texts give them.
+  // Query with the keyword to enter its keyword mode, as Search the Web does
+  // (Wren_GetLocationFocus). Each is "" with no default search engine.
+  WREN_LOCATION_TEXT_SEARCH_KEYWORD = 4,
+  WREN_LOCATION_TEXT_SEARCH_KEYWORD_NAME = 5,
 } WrenLocationText;
 
 typedef struct WrenLocationState {
@@ -84,6 +90,19 @@ WREN_API size_t Wren_CopyLocationText(WrenBrowser* browser,
                                       WrenLocationText text,
                                       char* buffer,
                                       size_t size);
+
+// Why on_focus_location_bar runs (Wren.h).
+typedef enum WrenLocationFocus {
+  // Focus the field, as for ⌘L or the New Tab page.
+  WREN_LOCATION_FOCUS_ADDRESS = 0,
+  // Focus the field in the default search engine's keyword mode, as Chrome's
+  // Search the Web does. Query with WREN_LOCATION_TEXT_SEARCH_KEYWORD.
+  WREN_LOCATION_FOCUS_SEARCH = 1,
+} WrenLocationFocus;
+
+// Why on_focus_location_bar runs for `browser`. Outside that callback,
+// WREN_LOCATION_FOCUS_ADDRESS.
+WREN_API WrenLocationFocus Wren_GetLocationFocus(WrenBrowser* browser);
 
 // --- Suggestions ------------------------------------------------------------
 

@@ -17,16 +17,17 @@
 // Threads and timing:
 //
 // - Call every function on the main thread, after on_ready. The exceptions
-//   are Wren_Main, Wren_GetAPIVersion, Wren_GetVersionInfo and the ID
-//   formatting functions below.
+//   are Wren_Main, Wren_GetAPIVersion, Wren_GetVersionInfo, the ID
+//   formatting functions below, and Wren_PostToMainThread, which hands the
+//   main thread work from any thread.
 // - Completion callbacks, such as those of Wren_OpenProfile and
 //   Wren_CreateBrowser, always run later from the event loop. They never run
 //   inside the call that started them.
 // - on_changed, on_reopen and on_open_urls run from the event loop, never
 //   inside a Chromium notification. So these callbacks may call any function.
-// - on_popover, on_fullscreen, on_downloads_prompt and on_quit_prompt are the
-//   exceptions. They run inside Chromium's call. WrenUI.h says what they may
-//   do.
+// - on_popover, on_fullscreen, on_downloads_prompt, on_quit_prompt and
+//   on_quit_committed are the exceptions. They run inside Chromium's call.
+//   WrenUI.h says what they may do.
 // - on_profile_extensions runs inside Chromium's call too, and may make no
 //   Wren calls.
 // - Closing, through Wren_CloseTab or Wren_CloseBrowser, and Wren_Quit are
@@ -65,10 +66,23 @@ extern "C" {
 // WrenUnstableUI.h has its own version, WREN_UNSTABLE_UI_VERSION. Set
 // WrenStartup.api_version to this. Wren_Main refuses any other version. The
 // Compatibility guide has the details.
-#define WREN_API_VERSION 46
+#define WREN_API_VERSION 64
 
 typedef struct WrenProfile WrenProfile;
 typedef struct WrenBrowser WrenBrowser;
+
+// A Profile's kind (Wren_GetProfileKind, WrenBrowser.h).
+typedef enum WrenProfileKind {
+  // Stored in user_data_dir, and listed.
+  WREN_PROFILE_PERSISTENT = 0,
+  // Chromium's incognito Profile of a persistent one. Its session ends when
+  // Chromium closes its last Browser. A later request starts a new session.
+  WREN_PROFILE_OFF_THE_RECORD = 1,
+  // Stored in user_data_dir, but not listed. Chromium deletes it once its last
+  // handle and its last Browser are gone, or at the next launch after a crash.
+  WREN_PROFILE_EPHEMERAL = 2,
+} WrenProfileKind;
+
 // A page the app places that is not a tab. See WrenWebView.h.
 typedef struct WrenWebView WrenWebView;
 
@@ -145,10 +159,19 @@ typedef enum WrenResult {
   // A page cancelled the call with beforeunload, so nothing was done. See
   // Wren_DeleteProfile.
   WREN_ERROR_CANCELLED = 15,
+  // The tab's page gave no picture: it is discarded, crashed or of no size,
+  // or drew nothing in time. See Wren_CaptureTab.
+  WREN_ERROR_NO_IMAGE = 16,
 } WrenResult;
 
 // Receives the result of a call that answers later, from the event loop.
 typedef void (*WrenResultCallback)(void* context, WrenResult result);
+// Receives a Browser a call made, from the event loop, as Wren_CreateBrowser
+// does (WrenBrowser.h). On success it receives one reference to the Browser.
+// On failure it receives NULL and the reason.
+typedef void (*WrenBrowserCallback)(void* context,
+                                    WrenBrowser* browser,
+                                    WrenResult result);
 
 // Why a page is gone, for a tab (WrenTabs.h) or a web view (WrenWebView.h).
 typedef enum WrenTabCrash {
@@ -295,8 +318,29 @@ typedef struct WrenAppExtension {
   // Profile. Off, it stays off until the user or the app turns it on
   // (Wren_SetExtensionEnabled). After the install, the Profile keeps whatever
   // the user or the app chose. An internal extension ignores it.
+  // on_profile_extensions may choose otherwise for one Profile.
   bool enabled_on_install;
+  // For a bundled extension, whether it is allowed in incognito when Wren
+  // installs it in a Profile, as with Allow in Incognito on Chrome's
+  // extensions page. False, as in Chrome, leaves that to the user or the app
+  // (Wren_SetExtensionAllowedInIncognito). After the install, the Profile
+  // keeps whatever they chose. An internal extension always runs in
+  // incognito. on_profile_extensions may choose otherwise for one Profile.
+  bool allowed_in_incognito_on_install;
 } WrenAppExtension;
+
+// A native messaging host the app answers in its own process. "Native
+// messaging" in WrenExtensions.h says how.
+typedef struct WrenNativeHost {
+  // Required. The name extensions pass to chrome.runtime.connectNative and
+  // sendNativeMessage, by Chromium's rule: lower-case letters, digits, "."
+  // and "_", with no "." at either end or beside another.
+  const char* name;
+  // Required, at least one. The extensions that may reach it, by ID, each 32
+  // letters from a to p.
+  const char* const* extension_ids;
+  size_t extension_id_count;
+} WrenNativeHost;
 
 // Which Manifest V2 extensions may run. Chromium refuses to install any other,
 // and turns off one that is installed. The Chrome Web Store refuses them all,
@@ -390,6 +434,10 @@ typedef struct WrenStartup {
   // Optional. An https URL that "Get help" in Settings > About opens in a new
   // tab. NULL hides the row, because Chromium's own help is Google's.
   const char* help_url;
+  // Optional. The app's version, such as "1.2.0", shown in Settings > About as
+  // "Version 1.2.0 (Official Build, Chromium 156.0.8078.48)". NULL shows
+  // Chromium's version alone. The same rules as product_name apply.
+  const char* app_version;
   // Optional. The app's own URL schemes. Chromium fixes its list of schemes
   // as it starts, so the app cannot add one later. The handlers the app sets
   // after on_ready answer their requests (Wren_SetSchemeHandler).
@@ -415,6 +463,12 @@ typedef struct WrenStartup {
   WrenManifestV2 manifest_v2;
   const char* const* manifest_v2_ids;
   size_t manifest_v2_id_count;
+  // Optional. The native messaging hosts the app answers. A bad name, a bad
+  // or missing ID, or two hosts with one name end Wren_Main with
+  // WREN_EXIT_INVALID_STARTUP. The handlers the app sets after on_ready
+  // answer their ports (Wren_SetNativeHostHandler).
+  const WrenNativeHost* native_hosts;
+  size_t native_host_count;
 } WrenStartup;
 
 // --- Changes ----------------------------------------------------------------
@@ -444,13 +498,10 @@ typedef enum WrenChangeKind {
   // A browser-modal dialog opened or closed over `browser`. See
   // Wren_HasModalDialog.
   WREN_CHANGE_MODAL_DIALOG = 7,
-  // `browser`'s extension actions changed, or its Profile's installed
-  // extensions did. Read them again.
-  //
-  // For actions, that is an action added, removed, pinned or reordered, or
-  // a change to an action's icon, name, tooltip, badge, enabled state, popup
-  // or pop-out, including on a tab switch. For installed extensions, it is an
-  // extension installed, removed, turned on or off, or its icon loaded.
+  // `browser`'s extension actions changed. An action was added, removed,
+  // pinned or reordered, or its icon, name, tooltip, badge, enabled state,
+  // popup or pop-out changed, including on a tab switch. Read them again.
+  // WREN_CHANGE_EXTENSIONS reports the installed extensions.
   WREN_CHANGE_EXTENSION_ACTIONS = 8,
   // A page action of `browser`'s active tab changed, or the active tab did.
   // An action may have been shown or hidden, or its label, tooltip, icon or
@@ -493,7 +544,9 @@ typedef enum WrenChangeKind {
   // it.
   WREN_CHANGE_CLOSED_TABS = 19,
   // Chromium asked for `browser`, which is in the background, to come
-  // forward. See Wren_HasForegroundRequest.
+  // forward. See Wren_HasForegroundRequest. By the time the app hears it,
+  // the app may have forgotten it (Wren_ClearForegroundRequest): the getter
+  // says what stands.
   WREN_CHANGE_FOREGROUND_REQUEST = 20,
   // `web_view`'s page began or stopped loading, failed to load, drew, or its
   // DevTools opened or closed. Or its process ended or started again. See
@@ -509,9 +562,11 @@ typedef enum WrenChangeKind {
   // `browser`'s find changed. It opened or ended, its text or its matches
   // changed, or the active tab did. See Wren_GetFindState (WrenUI.h).
   WREN_CHANGE_FIND = 24,
-  // `profile`'s downloads changed. One was added or went, or a download's
-  // progress or state changed. See Wren_GetDownloadCount (WrenDownloads.h).
-  // Reported once the app has read them.
+  // `profile`'s lists of downloads changed: one was added or went, one
+  // entered, left or moved in a list, or the history loaded. See
+  // Wren_GetDownloadCount and Wren_GetDownloadHistory (WrenDownloads.h).
+  // Reported once the app has read either. A change to one download that
+  // leaves the lists as they were is WREN_CHANGE_DOWNLOAD.
   WREN_CHANGE_DOWNLOADS = 25,
   // `browser`'s download button changed. See Wren_GetDownloadButtonState
   // (WrenDownloads.h). Reported once the app has read it.
@@ -525,6 +580,21 @@ typedef enum WrenChangeKind {
   // item, chrome://settings or policy, or policy began or stopped setting it.
   // See Wren_GetQuitWarningState.
   WREN_CHANGE_QUIT_WARNING = 28,
+  // `profile`'s installed extensions changed. One was installed, removed,
+  // turned on or off, or allowed in incognito or not, or its icon loaded.
+  // See Wren_GetExtensionCount (WrenExtensions.h). An off-the-record
+  // Profile's extensions are its original's, and each of the two the app has
+  // read hears the change. Reported once the app has read them.
+  WREN_CHANGE_EXTENSIONS = 29,
+  // `download`'s progress or state changed. See Wren_GetDownloadState
+  // (WrenDownloads.h). `profile` is the download's own. Reported once the app
+  // has read a list that has it, that of its Profile or of an off-the-record
+  // Profile of its Profile's.
+  WREN_CHANGE_DOWNLOAD = 30,
+  // Whether the app is the default browser changed, as Wren_SetAsDefaultBrowser
+  // or Wren_GetDefaultBrowserState found, or as Wren found when the app became
+  // active. Reported once the app has asked.
+  WREN_CHANGE_DEFAULT_BROWSER = 31,
 } WrenChangeKind;
 
 // Bits of WrenChange.tab_fields.
@@ -561,6 +631,14 @@ typedef enum WrenTabField {
   // The tab's page went into a <wren-view> element of a web view's page, or
   // left it. See WrenTabState.in_element.
   WREN_TAB_FIELD_IN_ELEMENT = 1u << 13,
+  // WrenTabState.alerts changed: any of its bits, not only the one Chrome
+  // shows.
+  WREN_TAB_FIELD_ALERTS = 1u << 14,
+  // The tab was muted or unmuted. See WrenTabState.muted.
+  WREN_TAB_FIELD_MUTED = 1u << 15,
+  // The tab was kept out of the session or put back. See
+  // WrenTabState.session_excluded.
+  WREN_TAB_FIELD_SESSION_EXCLUDED = 1u << 16,
 } WrenTabField;
 
 // A download (WrenDownloads.h). Unique for the life of the process, and never
@@ -577,24 +655,26 @@ typedef uint64_t WrenPopoverID;
 #define WREN_NO_POPOVER 0
 
 // One change. Wren coalesces changes. Each on_changed call has at most one
-// record per Profile, Browser, tab, group, split, popover request and web
-// view, in the order of each one's first change. A tab's fields are combined
-// into one record. Handles are borrowed.
+// record per Profile, Browser, tab, group, split, popover request, web view
+// and download, in the order of each one's first change. A tab's fields are
+// combined into one record. Handles are borrowed.
 //
 // Wren keeps no copy of Chromium's state for the app. When a change arrives,
 // read again what it names.
 typedef struct WrenChange {
   WrenChangeKind kind;
-  WrenProfile* profile;  // PROFILE_CLOSED, DOWNLOADS, BOOKMARKS
-  // Every kind but PROFILES, PROFILE_CLOSED, WEB_VIEW, DOWNLOADS, BOOKMARKS
-  // and QUIT_WARNING.
+  // PROFILE_CLOSED, DOWNLOADS, BOOKMARKS, EXTENSIONS, DOWNLOAD
+  WrenProfile* profile;
+  // Every kind but PROFILES, PROFILE_CLOSED, WEB_VIEW, DOWNLOADS, BOOKMARKS,
+  // QUIT_WARNING, EXTENSIONS, DOWNLOAD and DEFAULT_BROWSER.
   WrenBrowser* browser;
-  WrenTabID tab;          // TAB
-  uint32_t tab_fields;    // TAB
-  WrenTabGroupID group;   // GROUP
-  WrenSplitID split;      // SPLIT
-  WrenPopoverID popover;  // POPOVER
-  WrenWebView* web_view;  // WEB_VIEW
+  WrenTabID tab;            // TAB
+  uint32_t tab_fields;      // TAB
+  WrenTabGroupID group;     // GROUP
+  WrenSplitID split;        // SPLIT
+  WrenPopoverID popover;    // POPOVER
+  WrenWebView* web_view;    // WEB_VIEW
+  WrenDownloadID download;  // DOWNLOAD
 } WrenChange;
 
 // --- App delegate -----------------------------------------------------------
@@ -613,6 +693,9 @@ typedef enum WrenPopoverAnswer {
 typedef struct WrenPopoverRequest WrenPopoverRequest;
 typedef struct WrenDownloadsPrompt WrenDownloadsPrompt;
 typedef struct WrenQuitPrompt WrenQuitPrompt;
+typedef struct WrenWindowRequest WrenWindowRequest;
+// Defined in WrenExtensions.h, "App extensions".
+typedef struct WrenProfileExtensionsRequest WrenProfileExtensionsRequest;
 
 // Chromium's kinds of Browser, one for one. What a Browser's window shows
 // comes from Wren_GetWindowFeatures, not from its type, because two popups
@@ -663,6 +746,11 @@ typedef struct WrenAppDelegate {
   //
   // The app receives one reference. It shows the Browser in a window of its
   // own, or closes it with Wren_CloseBrowser. `opener` may be NULL.
+  //
+  // Wren_IsBrowserActive tells how Chromium wants it shown. If true, show the
+  // window and make it key. If false, Chromium showed it without activating
+  // it, as for a window an extension opens unfocused. Order the window in
+  // behind the key window, without making it key.
   void (*on_browser_opened)(void* context,
                             WrenBrowser* browser,
                             WrenBrowserType type,
@@ -680,12 +768,13 @@ typedef struct WrenAppDelegate {
   // schemes and document types in Info.plist. The strings are UTF-8, and valid
   // only during the call.
   void (*on_open_urls)(void* context, const char* const* urls, size_t count);
-  // Quit can no longer be cancelled. Runs once, after every
+  // The app is quitting. Runs once, after on_quit_committed and every
   // on_browser_closed.
   void (*on_will_quit)(void* context);
   // Chromium wants the app's address field focused for the Browser's active
-  // tab, such as when Wren_FocusTab finds the New Tab page. Runs from the
-  // event loop.
+  // tab, such as when Wren_FocusTab finds the New Tab page, or for Search the
+  // Web in Chrome's menu. Wren_GetLocationFocus says which (WrenOmnibox.h).
+  // Runs from the event loop.
   void (*on_focus_location_bar)(void* context, WrenBrowser* browser);
   // Chromium is about to open one of its popovers. The app answers whether the
   // popover is Chromium's, the app's, or none. NULL leaves every popover to
@@ -725,11 +814,10 @@ typedef struct WrenAppDelegate {
   WrenPopoverAnswer (*on_downloads_prompt)(void* context,
                                            const WrenDownloadsPrompt* prompt);
   // A persistent or ephemeral Profile is loading, and Wren asks which of
-  // WrenStartup.extensions it gets. `profile_id` is the Profile's ID, as
-  // Wren_CopyProfileID gives it. `gets` has `count` entries, one for each of
-  // WrenStartup.extensions, in its order, and each is true. The app sets
-  // false for each extension the Profile does not get. Both are valid only
-  // during the call.
+  // WrenStartup.extensions it gets, and how each starts there. The request
+  // names the Profile and its kind, and has one entry for each extension.
+  // The app changes the entries before it returns. The request is valid only
+  // during the call. WrenExtensions.h, "App extensions", has the details.
   //
   // Wren asks once for each Profile in a launch, before Chromium loads the
   // Profile's extensions, and so before Wren has a WrenProfile for it. It may
@@ -737,12 +825,10 @@ typedef struct WrenAppDelegate {
   // from it. An off-the-record Profile has what its original has, and is
   // never asked about.
   //
-  // NULL gives every Profile every extension. Wren never asks without
-  // extensions.
+  // NULL gives every Profile every extension, each as WrenAppExtension says.
+  // Wren never asks without extensions.
   void (*on_profile_extensions)(void* context,
-                                const char* profile_id,
-                                bool* gets,
-                                size_t count);
+                                WrenProfileExtensionsRequest* request);
   // The user pressed the Quit item's key, ⌘Q, while Warn Before Quitting is
   // on (Wren_GetQuitWarningState), and Chromium would warn. The app answers
   // whose warning it is, as for a popover:
@@ -764,6 +850,45 @@ typedef struct WrenAppDelegate {
   // Runs inside Chromium's call, with on_popover's rules (WrenUI.h).
   WrenPopoverAnswer (*on_quit_prompt)(void* context,
                                       const WrenQuitPrompt* prompt);
+  // The app is quitting, and the quit can no longer be cancelled. Every
+  // page's beforeunload and the downloads prompt have passed. Runs once, before
+  // the quit's first on_browser_closed. Then each Browser closes and
+  // on_will_quit runs.
+  //
+  // It runs for ⌘Q, Quit in a menu or the Dock, logging out and Wren_Quit.
+  // With no Browser open, it runs just before on_will_quit. When the system
+  // ends the process with SIGTERM, as launchd may at logout or shutdown, it
+  // runs and then the process ends, with no on_browser_closed and no
+  // on_will_quit.
+  //
+  // An app that shows several Browsers in one window hides its windows here,
+  // so they do not empty one Browser at a time. It may also save its own
+  // records.
+  //
+  // Runs inside Chromium's call, with on_popover's rules (WrenUI.h).
+  void (*on_quit_committed)(void* context);
+  // Chromium asks for `browser`'s window to move, resize, minimise, zoom or
+  // restore (WrenWindowRequest, WrenBrowser.h). An extension's
+  // chrome.windows.update, a debugging tool, or a popup's resizeTo or moveTo
+  // asked. Wren does nothing itself. The app does what was asked, adapts it,
+  // or ignores it, and Chromium then reads the window as it is. NULL ignores
+  // every request, as before 0.3.0.
+  //
+  // A frame, or the normal state, for a window in full screen means leaving
+  // full screen first, as Chrome does. A Browser in the background shares its
+  // window, so ignore its requests, or bring it forward first.
+  //
+  // Wren asks only for a Browser attached to a view, and only for what its
+  // window is not already. Runs from the event loop. `request` is valid only
+  // during the call.
+  void (*on_window_request)(void* context,
+                            WrenBrowser* browser,
+                            const WrenWindowRequest* request);
+  // Chromium's About page asks for an update check: a page opened, or asked
+  // again. Never while the update state is WREN_UPDATE_NONE (WrenUpdates.h).
+  // The app decides whether to check, and tells the page what its updater
+  // does with Wren_SetUpdateState. Runs from the event loop.
+  void (*on_update_check)(void* context);
 } WrenAppDelegate;
 
 // --- Lifecycle and version --------------------------------------------------
@@ -795,8 +920,9 @@ WREN_API WrenExit Wren_Main(const WrenStartup* startup,
 
 // Asks the app to quit. A page may cancel the quit with beforeunload. With
 // downloads in progress, the user or the app may cancel it
-// (on_downloads_prompt). Otherwise every Browser gets on_browser_closed, then
-// on_will_quit runs, and Wren_Main returns WREN_EXIT_NORMAL.
+// (on_downloads_prompt). Otherwise on_quit_committed runs, every Browser gets
+// on_browser_closed, then on_will_quit runs, and Wren_Main returns
+// WREN_EXIT_NORMAL.
 //
 // It never warns, whether or not Warn Before Quitting is on: only the Quit
 // item's key does (on_quit_prompt). An app that wants the user to confirm
@@ -860,6 +986,98 @@ typedef struct WrenVersionInfo {
 // Fills `info` with static strings. May be called at any time.
 WREN_API void Wren_GetVersionInfo(WrenVersionInfo* info);
 
+// --- The default browser ----------------------------------------------------
+//
+// Whether the app is the browser macOS opens web links with, and asking the
+// user to make it so, as Chrome's Settings do. The app is the default browser
+// when it opens http links. For macOS to offer it, its Info.plist declares the
+// http and https schemes and the HTML type (`wren bundle`'s `urlSchemes` and
+// `documentTypes`).
+
+typedef enum WrenDefaultBrowser {
+  // macOS did not say, or the app has no bundle ID.
+  WREN_DEFAULT_BROWSER_UNKNOWN = 0,
+  WREN_DEFAULT_BROWSER_NO = 1,
+  WREN_DEFAULT_BROWSER_YES = 2,
+} WrenDefaultBrowser;
+
+typedef struct WrenDefaultBrowserState {
+  WrenDefaultBrowser state;
+  // False where the DefaultBrowserSettingEnabled policy is off. Chrome's
+  // Settings disable their button then, and Wren_SetAsDefaultBrowser refuses.
+  bool can_set;
+} WrenDefaultBrowserState;
+
+// Receives the answer of Wren_GetDefaultBrowserState or
+// Wren_SetAsDefaultBrowser, from the event loop. `state` is NULL unless
+// `result` is WREN_OK, and borrowed until the callback returns.
+typedef void (*WrenDefaultBrowserCallback)(void* context,
+                                           const WrenDefaultBrowserState* state,
+                                           WrenResult result);
+
+// Asks macOS whether the app is the default browser, off the main thread, and
+// gives the answer to `callback` from the event loop. The call returns at once.
+// `callback` is required. It is not called before on_ready, or once the app
+// quits.
+//
+// From the first call, or the first Wren_SetAsDefaultBrowser, Wren asks again
+// each time the app becomes active, and reports WREN_CHANGE_DEFAULT_BROWSER
+// whenever an answer differs from the one before. Someone who changes the
+// default browser in System Settings leaves the app to do so. A change made
+// while the app stays active is seen the next time it becomes active.
+WREN_API void Wren_GetDefaultBrowserState(WrenDefaultBrowserCallback callback,
+                                          void* context);
+
+// Asks macOS to make the app the default browser, as Chrome's Settings do.
+// macOS asks the user, and `callback` gets the answer from the event loop
+// about when its prompt goes away: WREN_DEFAULT_BROWSER_YES if the user
+// accepted, else what the default browser is. The call returns at once.
+// `callback` is required. It is not called before on_ready, or once the app
+// quits. There is no time limit: the user may leave the prompt open.
+//
+// - While a prompt is open, another call does not ask macOS again. It gets
+//   the open prompt's answer.
+// - The app's windows stay where they are. macOS's prompt comes in front.
+//
+// `callback` gets WREN_ERROR_NOT_ALLOWED where the DefaultBrowserSettingEnabled
+// policy is off, or for a call made inside a callback that runs inside
+// Chromium's call.
+WREN_API void Wren_SetAsDefaultBrowser(WrenDefaultBrowserCallback callback,
+                                       void* context);
+
+// --- Work from other threads -------------------------------------------------
+//
+// For an app that runs another event loop beside Wren's, such as an embedded
+// runtime's: its thread waits for its own work, then hands the work to the
+// main thread, where Wren's calls are made.
+
+// Runs or discards work an app posted. `context` is the app's.
+typedef void (*WrenPostedWork)(void* context);
+
+// Asks Wren to run `run` on the main thread, from the event loop. It may be
+// called on any thread, the main thread included, and wakes the event loop if
+// it is waiting. It makes no other function callable off the main thread.
+//
+// - `run` never runs inside this call, or inside a Chromium notification. So
+//   it may call any function, as on_changed may.
+// - Work posted from one thread runs in the order it was posted. There is no
+//   order between threads, or against Wren's own callbacks.
+// - It also runs inside a nested loop where Chromium lets tasks run, such as
+//   while a context menu is open.
+// - Work that has not run when the event loop ends is discarded: `discard`
+//   runs instead, on the main thread, before Wren_Main returns. `discard` may
+//   be NULL. On SIGTERM nothing more runs, as on_will_quit does not.
+//
+// Returns WREN_OK once Wren has the work. Then exactly one of `run` and
+// `discard` runs. Otherwise neither runs, and `context` is still the app's:
+//
+// - WREN_ERROR_NOT_ALLOWED before on_ready
+// - WREN_ERROR_CLOSED once the event loop has ended
+// - WREN_ERROR_INVALID_ARGUMENT for a NULL `run`
+WREN_API WrenResult Wren_PostToMainThread(WrenPostedWork run,
+                                          WrenPostedWork discard,
+                                          void* context);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
@@ -890,5 +1108,9 @@ WREN_API void Wren_GetVersionInfo(WrenVersionInfo* info);
 #include "WrenWebView.h"
 // Menus the app describes as data.
 #include "WrenMenus.h"
+// The system clipboard.
+#include "WrenClipboard.h"
+// The app's updates, and relaunching.
+#include "WrenUpdates.h"
 
 #endif  // WREN_PUBLIC_WREN_H_

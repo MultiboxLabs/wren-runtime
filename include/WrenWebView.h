@@ -88,6 +88,15 @@ typedef struct WrenWebViewOptions {
   // the view, such as a material or the window's own background. Every page
   // in the view is see-through, not only the app's own.
   bool transparent;
+  // If true, a click in a drag area reaches the page, and only a press that
+  // moves moves the window. Needs drags_window. See "Dragging the window".
+  bool drag_area_clicks;
+  // If true, the view's pages may draw elements as Liquid Glass, with the CSS
+  // property -wren-glass. See "Liquid Glass".
+  bool glass;
+  // If true, the view's own pages read a trackpad scroll's phases, and hear
+  // its fingers land and lift and its glide end. See "Scroll phases".
+  bool wheel_phases;
 } WrenWebViewOptions;
 
 // Makes a web view in `profile` and starts loading `url`. `options` may be
@@ -101,6 +110,7 @@ typedef struct WrenWebViewOptions {
 // - a trusted origin that is not an origin
 // - trusted origins with none of the options they would give anything to,
 //   which are messages, anchors, embeds_views and drags_window
+// - drag_area_clicks without drags_window
 // - a Profile that has closed
 // - a call inside a callback that asks the app a question
 WREN_API WrenWebView* Wren_CreateWebView(WrenProfile* profile,
@@ -194,13 +204,14 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 
 // --- Trusted origins --------------------------------------------------------
 //
-// A web view's page gets four things from the app, each turned on by its own
+// A web view's page gets five things from the app, each turned on by its own
 // option:
 //
 // - `wren`, by `messages`
 // - marks for bubbles, by `anchors`
 // - <wren-view>, by `embeds_views`
 // - drag areas, by `drags_window`
+// - a scroll's phases, by `wheel_phases`
 //
 // The page has them only while it is one of the app's own pages. By default
 // those are the pages on the app's schemes (WrenSchemes.h).
@@ -333,10 +344,22 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 //
 // - A left mouse-down starts moving the window, and does not reach the page.
 // - A double click does what the user chose in System Settings for a title
-//   bar's double click: zoom, minimise or nothing.
+//   bar's double click: zoom, fill, minimise or nothing.
 // - Right clicks, control-clicks, scrolling and pointer movement reach the
 //   page as anywhere else. So a drag area still gets its contextmenu event and
 //   its hover styles.
+//
+// That is how Chromium's own windows and Electron's treat a drag area, on
+// every platform: no left click there reaches the page. With
+// `drag_area_clicks` the view tells a click from a drag instead:
+//
+// - A left press moves the window once the pointer moves more than 3 points,
+//   and the page sees none of it. Released before then, it is a click, and
+//   the page gets it then: its mousedown, mouseup and click come at the
+//   release. In a window that is not key, the page gets it only where a
+//   page's first click would reach it anywhere else.
+// - A double click gives the page both clicks, then does the title bar's
+//   action, as above. The page cannot stop it.
 //
 // An area is the box of the element that has the property. The property is
 // inherited, so each element inside a drag area drags too. Give `no-drag` to
@@ -362,6 +385,82 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 //   elsewhere or loses its process. They come back with the next page's first
 //   layout.
 
+// --- Liquid Glass -----------------------------------------------------------
+//
+// The pages of a view made with `glass` may draw an element as Liquid Glass,
+// the material of macOS 26's controls, which shows what lies behind it, blurred
+// and bent:
+//
+//   .toolbar { -wren-glass: regular; border-radius: 18px; }
+//
+// -wren-glass is `none`, the default, `regular` or `clear`, the two styles of
+// NSGlassEffectView. Glass shows only on an element that paints a background,
+// border or shadow, which the glass replaces; give an element with none of them
+// a background. Glass fills the element's border box, rounded by the
+// largest of its four corner radii. The element's background, border and
+// box-shadow are not drawn. Its content and its focus outline draw on the
+// glass. What shows through is what lies behind the element: the page under
+// it, and where the page is see-through (`transparent`), the window behind.
+//
+// - The glass is light or dark as the element's used `color-scheme` is, so
+//   one element can have dark glass in a light page. Its `light-dark()`
+//   colours take the same side.
+// - -wren-glass-tint tints the glass toward a colour, as NSGlassEffectView's
+//   tintColor does. It is `auto`, untinted, or any CSS colour. A colour the
+//   view has not drawn before may draw untinted for a frame or two.
+// - While its window is not active, the glass is subdued and untinted, as
+//   AppKit's is. A window is active while it is key, or main while the app is
+//   active, or a child window of one of those.
+// - The glass follows the user's Reduce Transparency and Increase Contrast
+//   settings, as AppKit's does.
+//
+// Where Wren cannot draw glass, the element draws as its CSS says, so give it
+// a background to fall back on, or a backdrop-filter: on an element with glass
+// it draws only where the glass does not. Glass cannot draw while the window
+// is captured, as in screen sharing, or in a frame that Chromium draws without
+// Core Animation layers. It does that for the whole window while the view's
+// page has a backdrop-filter on an element without glass, or too many layers
+// to give each one its own. A tab or side panel the page shows draws apart
+// from it, so a website there never stops the page's glass.
+//
+// Every page in the view may use glass, in every frame and of any origin: it
+// changes only how the page's own pixels draw. The properties do not exist in
+// a view made without `glass`, or in a tab, so a website cannot tell Wren from
+// Chrome by them there. Only the Mac draws glass.
+
+// --- Scroll phases ----------------------------------------------------------
+//
+// The app's own pages in a view made with `wheel_phases`, in any frame, read
+// the phases of a trackpad's scroll on each `wheel` event, as AppKit gives
+// them, to follow the fingers as a native control does:
+//
+//   addEventListener('wheel', e => {
+//     if (e.wrenPhase === 'ended') settle();
+//   });
+//
+// `wrenPhase` is the fingers' phase, and `wrenMomentumPhase` the glide's
+// after they lift. Each is one of:
+//
+// - "none": not in this part of the scroll. A mouse's wheel is "none" in both.
+// - "may-begin": the fingers landed and have not moved.
+// - "began": the fingers began to move.
+// - "changed": they moved, or rest on the trackpad.
+// - "ended": they lifted, or the glide stopped.
+// - "cancelled": they lifted without moving.
+//
+// Such a page also hears what no other page does, each as a `wheel` event of
+// no delta that cannot be cancelled: fingers that land ("may-begin"), fingers
+// that lift ("ended" or "cancelled"), and a glide's end. A handler that counts
+// events, or divides by a delta, skips them. The lift comes up to 100 ms after
+// the fingers leave, as Chromium waits to see whether a glide follows. When
+// one does, the lift comes just before the glide's first event.
+//
+// Nothing else changes: the page scrolls as before, and preventDefault() does
+// what it does in Chrome. A page that is not the app's own (see "Trusted
+// origins"), a page in a view made without the option, and a tab's page have
+// neither the fields nor the events, so a website cannot tell Wren from Chrome
+// by them. Only the Mac's trackpads give phases.
+
 // --- Messages ---------------------------------------------------------------
 //
 // The page of a view made with `messages` and the app can call each other, as
@@ -382,7 +481,9 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 //
 // The channel is for pages the app trusts: its own UI, which it wrote and
 // serves. A page with `wren` reaches every handler the app set. It is not a
-// way for websites, extensions or other content to reach the app.
+// way for websites, extensions or other content to reach the app. An
+// extension reaches the app through native messaging ("Native messaging" in
+// WrenExtensions.h).
 //
 // - Only the view's own page has `wren`, and only while it is on one of the
 //   app's schemes (WrenSchemes.h) or a trusted origin. A tab on such a scheme,

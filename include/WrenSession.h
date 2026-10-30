@@ -44,6 +44,11 @@ typedef struct WrenSessionState {
   // True if the app did not quit but crashed or was killed. In that case
   // Chrome offers to restore instead of restoring.
   bool crashed;
+  // True if the last session ended in a relaunch: Chromium's own, from
+  // Wren_Relaunch or About's Relaunch, or one handed to the app
+  // (Wren_LeaveRelaunchToApp). Chrome restores after a relaunch. The same for
+  // every Profile.
+  bool relaunched;
 } WrenSessionState;
 
 // `state` is valid only during the call. It is NULL unless `result` is

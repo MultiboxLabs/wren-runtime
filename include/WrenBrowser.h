@@ -19,17 +19,6 @@ extern "C" {
 
 // --- Profiles ---------------------------------------------------------------
 
-typedef enum WrenProfileKind {
-  // Stored in user_data_dir, and listed.
-  WREN_PROFILE_PERSISTENT = 0,
-  // Chromium's incognito Profile of a persistent one. Its session ends when
-  // Chromium closes its last Browser. A later request starts a new session.
-  WREN_PROFILE_OFF_THE_RECORD = 1,
-  // Stored in user_data_dir, but not listed. Chromium deletes it once its last
-  // handle and its last Browser are gone, or at the next launch after a crash.
-  WREN_PROFILE_EPHEMERAL = 2,
-} WrenProfileKind;
-
 // Receives one reference to the Profile on success. On failure it receives
 // NULL and the reason.
 typedef void (*WrenProfileCallback)(void* context,
@@ -253,13 +242,161 @@ WREN_API void Wren_ClearBrowsingData(WrenProfile* profile,
                                      WrenClearBrowsingDataCallback callback,
                                      void* context);
 
-// --- Browsers ---------------------------------------------------------------
+// --- Importing history ------------------------------------------------------
+//
+// For an app that brings the user over from another browser. The app reads
+// that browser's history itself.
 
-// Receives one reference to the Browser on success. On failure it receives
-// NULL and the reason.
-typedef void (*WrenBrowserCallback)(void* context,
-                                    WrenBrowser* browser,
-                                    WrenResult result);
+// A page of the user's history in another browser.
+typedef struct WrenHistoryEntry {
+  const char* url;
+  // The page's title, or NULL.
+  const char* title;
+  // The last visit, in milliseconds since 1970, UTC.
+  int64_t last_visit_ms;
+  // How often the user visited the page, and how often they typed its
+  // address. The address bar suggests a page typed once, visited 4 times, or
+  // visited in the past 3 days.
+  int32_t visit_count;
+  int32_t typed_count;
+} WrenHistoryEntry;
+
+// Receives the result of Wren_AddHistory. With WREN_OK, `added` is the number
+// of entries written.
+typedef void (*WrenAddHistoryCallback)(void* context,
+                                       WrenResult result,
+                                       size_t added);
+
+// Adds `entries` to the Profile's history, as Chromium's importer does. A page
+// history already has keeps its title and counts, and gains a visit at
+// `last_visit_ms`. Wren leaves out a URL history does not keep, such as
+// chrome:// and about: pages, and a last visit older than 90 days, which
+// Chromium would delete. `added` counts the rest. Chromium writes them to disk
+// within seconds, and at quit. An off-the-record Profile adds to its
+// original's. `callback` gets the result from the event loop.
+//
+// `callback` gets one of these errors without anything being added:
+//
+// - WREN_ERROR_INVALID_ARGUMENT for no Profile, NULL `entries` with a count,
+//   or an entry with a NULL or invalid URL, or a count below 0.
+// - WREN_ERROR_CLOSED once the Profile has closed.
+// - WREN_ERROR_NOT_ALLOWED inside on_popover.
+WREN_API void Wren_AddHistory(WrenProfile* profile,
+                              const WrenHistoryEntry* entries,
+                              size_t count,
+                              WrenAddHistoryCallback callback,
+                              void* context);
+
+// --- Importing cookies ------------------------------------------------------
+
+typedef enum WrenCookieSameSite {
+  WREN_COOKIE_SAME_SITE_UNSPECIFIED = 0,
+  WREN_COOKIE_SAME_SITE_NONE = 1,
+  WREN_COOKIE_SAME_SITE_LAX = 2,
+  WREN_COOKIE_SAME_SITE_STRICT = 3,
+} WrenCookieSameSite;
+
+// A cookie of the user's in another browser.
+typedef struct WrenCookie {
+  const char* name;
+  const char* value;
+  // ".example.com" for the domain and its subdomains, "example.com" for the
+  // host only.
+  const char* domain;
+  const char* path;
+  // Milliseconds since 1970, UTC. 0 for `expires_ms` is a session cookie, and
+  // 0 for the others is now.
+  int64_t created_ms;
+  int64_t expires_ms;
+  int64_t last_access_ms;
+  bool secure;
+  bool http_only;
+  WrenCookieSameSite same_site;
+  // The top-level site of a partitioned (CHIPS) cookie, such as
+  // "https://example.com", or NULL.
+  const char* partition_site;
+  // True if the partitioned cookie was set in a frame with a cross-site
+  // ancestor.
+  bool partition_cross_site_ancestor;
+} WrenCookie;
+
+typedef enum WrenCookieResult {
+  WREN_COOKIE_WRITTEN = 0,
+  // Not a cookie Chromium keeps: its name, value, domain, path, prefix or
+  // partition is invalid, or it is SameSite=None or partitioned without
+  // Secure.
+  WREN_COOKIE_INVALID = 1,
+  // It had already expired.
+  WREN_COOKIE_EXPIRED = 2,
+  // A Secure cookie of the same name is there, which a cookie that is not
+  // Secure may not replace.
+  WREN_COOKIE_CONFLICT = 3,
+  // Chromium could not store it.
+  WREN_COOKIE_FAILED = 4,
+} WrenCookieResult;
+
+// Receives the result of Wren_AddCookies. With WREN_OK, `results` has one
+// result for each cookie, in order, valid during the call.
+typedef void (*WrenAddCookiesCallback)(void* context,
+                                       WrenResult result,
+                                       const WrenCookieResult* results,
+                                       size_t count);
+
+// Writes `cookies` into the Profile's cookie store, as a site setting them
+// would, HttpOnly and SameSite included, and writes the store to disk before
+// it answers. An off-the-record Profile's cookies are its own, and go when it
+// closes. `callback` gets the results from the event loop. It is not called if
+// the app quits first.
+//
+// `callback` gets one of these errors without anything being written:
+//
+// - WREN_ERROR_INVALID_ARGUMENT for no Profile, NULL `cookies` with a count,
+//   a cookie with a NULL name, value, domain or path, or an unknown
+//   `same_site`.
+// - WREN_ERROR_CLOSED once the Profile has closed. If it closes before the
+//   cookies are written, `callback` gets it too.
+// - WREN_ERROR_NOT_ALLOWED inside on_popover.
+WREN_API void Wren_AddCookies(WrenProfile* profile,
+                              const WrenCookie* cookies,
+                              size_t count,
+                              WrenAddCookiesCallback callback,
+                              void* context);
+
+// --- The password manager ---------------------------------------------------
+
+// Chromium's password manager in a Profile: saving and filling passwords, its
+// key in the address bar (WREN_PAGE_ACTION_PASSWORDS) and its prompts
+// (WREN_POPOVER_PASSWORDS). It is on unless the app turns it off. An app with
+// a password manager of its own, or an extension's, turns it off.
+typedef struct WrenPasswordManagerState {
+  // On, as in Chrome. Off, Chromium offers to save no password, fills none,
+  // suggests none, signs in to no site, and shows no key or prompt. What is
+  // saved stays saved, and chrome://password-manager still lists it.
+  bool on;
+  // Policy sets the sites it is off for (PasswordManagerBlocklist), and
+  // Wren_SetPasswordManager refuses to change it.
+  bool managed;
+} WrenPasswordManagerState;
+
+// Fills `state`. An off-the-record Profile has its original's. Returns
+// WREN_ERROR_CLOSED once the Profile has closed.
+WREN_API WrenResult
+Wren_GetPasswordManagerState(WrenProfile* profile,
+                             WrenPasswordManagerState* state);
+
+// Turns the password manager on or off for `profile` and its off-the-record
+// Profile, and for later launches. Pages loaded from a moment after the call
+// follow it; a page already filled keeps its values. Off also turns Chrome's
+// "Offer to save passwords" and "Sign in automatically" off in Settings,
+// unless the user turned them on. On an off-the-record Profile, it sets its
+// original's.
+//
+// Returns WREN_ERROR_NOT_ALLOWED where policy sets it, or inside a callback
+// that runs inside Chromium's call, and WREN_ERROR_CLOSED once the Profile
+// has closed.
+WREN_API WrenResult Wren_SetPasswordManager(WrenProfile* profile, bool on);
+
+// --- Browsers ---------------------------------------------------------------
 
 // Creates a Browser on `profile` with one tab showing `initial_url`. If
 // `initial_url` is NULL or empty, the tab shows Chromium's New Tab page.
@@ -315,6 +452,43 @@ WREN_API bool Wren_GetRequestedBounds(WrenBrowser* browser,
                                       double* width,
                                       double* height);
 
+// A window's state, as Chromium reads it and asks for it. Full screen is apart
+// from these (Wren_SetFullscreen).
+typedef enum WrenWindowState {
+  WREN_WINDOW_STATE_NORMAL = 0,
+  WREN_WINDOW_STATE_MINIMIZED = 1,
+  // Zoomed, as by the green button or Window > Zoom. Chromium calls it
+  // maximised.
+  WREN_WINDOW_STATE_ZOOMED = 2,
+} WrenWindowState;
+
+// Reads the state Chromium wants the Browser's new window in, for
+// on_browser_opened. A restored window that was minimised asks for
+// WREN_WINDOW_STATE_MINIMIZED, and so does an extension's
+// chrome.windows.create with state "minimized". Returns
+// WREN_WINDOW_STATE_NORMAL once the Browser has closed.
+WREN_API WrenWindowState Wren_GetRequestedWindowState(WrenBrowser* browser);
+
+// What Chromium asks of a Browser's window (on_window_request, Wren.h).
+typedef enum WrenWindowRequestKind {
+  // Move or resize the window to the request's frame.
+  WREN_WINDOW_REQUEST_FRAME = 0,
+  // Put the window in the request's state.
+  WREN_WINDOW_REQUEST_STATE = 1,
+} WrenWindowRequestKind;
+
+struct WrenWindowRequest {
+  WrenWindowRequestKind kind;
+  // STATE. WREN_WINDOW_STATE_NORMAL also takes the window out of full screen,
+  // as Chrome does.
+  WrenWindowState state;
+  // FRAME. The window's frame, in AppKit screen coordinates.
+  double x;
+  double y;
+  double width;
+  double height;
+};
+
 // Places Chromium's own browser UI over `ns_view`, the app's view that holds
 // the tab views. That UI is dialogs, and permission and passkey prompts.
 // Attach every Browser the app shows.
@@ -326,9 +500,13 @@ WREN_API bool Wren_GetRequestedBounds(WrenBrowser* browser,
 // - The view's window becomes the Browser's window. The Browser is active
 //   while that window, or a Chromium window over it, is key.
 // - When Chromium asks to activate the Browser, Wren makes the window key,
-//   once the app has shown it. A window the app has not shown yet, such as one
-//   waiting for its page to draw, is left to the app. So is a window the app
-//   has taken off screen itself.
+//   once the app has shown it. If the app is not active, Wren activates it
+//   first, as Chrome does, so a hidden app comes forward. A window the app has
+//   not shown yet, such as one waiting for its page to draw, is left to the
+//   app. So is a window the app has taken off screen itself.
+// - Chromium also asks when it shows a Browser that is already shown, for
+//   example for a switch to one of its tabs, or for Settings opened from an
+//   off-the-record Browser.
 // - Browser-modal dialogs, and the file panels Chromium opens, are sheets of
 //   the view's window. See Wren_HasModalDialog.
 // - Bubbles hang off the app's views named with Wren_SetAnchor.
@@ -346,6 +524,10 @@ WREN_API void Wren_AttachBrowserToView(WrenBrowser* browser, void* ns_view);
 // state is known. It also counts as active while Chromium has asked to
 // activate it and the app has not shown its window. WREN_CHANGE_ACTIVE reports
 // each change. Returns false once the Browser has closed.
+//
+// In on_browser_opened, it is false only for a Browser Chromium showed
+// without activating it. A request to stay back, such as an extension's
+// chrome.windows.update with focused false, changes nothing, as in Chrome.
 WREN_API bool Wren_IsBrowserActive(WrenBrowser* browser);
 
 // Returns true while one of Chromium's browser-modal dialogs is open for the
@@ -379,8 +561,9 @@ WREN_API bool Wren_HasModalDialog(WrenBrowser* browser);
 //   shown and block nothing. They wait, and show once it is in front.
 // - When Chromium asks to activate it, it stays where it is, and Wren tells
 //   the app. The app decides whether to bring it forward. Such requests come
-//   from a click on a notification, an extension's chrome.windows.update, or
-//   a page focusing a window it opened.
+//   from a click on a notification, an extension's chrome.windows.update, a
+//   page focusing a window it opened, a switch to one of its tabs, or Settings
+//   opened from an off-the-record Browser.
 //
 // Its tabs stay open and loaded, like the tabs of a window behind another.
 // What its tabs' views or elements show is up to the app and its page.
@@ -397,9 +580,16 @@ WREN_API WrenResult Wren_SetBrowserBackgrounded(WrenBrowser* browser,
 WREN_API bool Wren_IsBrowserBackgrounded(WrenBrowser* browser);
 
 // Returns true if Chromium has asked for the Browser to come forward since it
-// went into the background. WREN_CHANGE_FOREGROUND_REQUEST reports the first
-// such request. Returns false once the Browser has closed.
+// went into the background, or since the app last called
+// Wren_ClearForegroundRequest. WREN_CHANGE_FOREGROUND_REQUEST reports the
+// first such request. Returns false once the Browser has closed.
 WREN_API bool Wren_HasForegroundRequest(WrenBrowser* browser);
+// Forgets the Browser's request to come forward, and leaves it in the
+// background. Chromium's next request is reported again. Use it for a
+// request the app will not act on, such as the one a session restore makes
+// for the Browser it activates. Reports no change, and may be called from
+// any callback. A Browser in front has no request: returns WREN_OK.
+WREN_API WrenResult Wren_ClearForegroundRequest(WrenBrowser* browser);
 
 // --- Full screen ------------------------------------------------------------
 //

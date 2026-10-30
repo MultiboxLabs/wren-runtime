@@ -1,28 +1,18 @@
 # Menus
 
-Your menus are data. You give Wren a list of items. Wren shows a native menu,
-and tells you which of your items was chosen, by the ID you gave it. The same
-list works on every platform Wren runs on. So a browser drawn in HTML can
-describe its menus in the page, and leave the host only to pass them on. The C
-side is
-[`WrenMenus.h`](../include/WrenMenus.h).
+Your menus are data. You give Wren a list of items. Wren shows a native menu, and tells you which of your items was chosen, by the ID you gave it. The same list works on every platform Wren runs on. So a browser drawn in HTML can describe its menus in the page, and leave the host only to pass them on. The C side is [`WrenMenus.h`](../include/WrenMenus.h).
 
 ## Items
 
-| Item         | Swift                                         | Rust                                                          | What it is                                        |
-| ------------ | --------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- |
-| Your own     | `.item(id:label:enabled:checked:hidden:key:)` | `MenuItem::Item { id, label, enabled, checked, hidden, key }` | Reported by `id` when chosen                      |
-| A separator  | `.separator`                                  | `MenuItem::Separator`                                         |                                                   |
-| A submenu    | `.submenu(label:role:items:)`                 | `MenuItem::Submenu { label, role, items }`                    | Up to four deep                                   |
-| The system's | `.role(_:label:key:enabled:)`                 | `MenuItem::Role { role, label, key, enabled }`                | Main menu only. Copy, Quit, Minimize and the like |
-| Chromium's   | `.chromium(_:label:key:enabled:)`             | `MenuItem::Chromium { command, label, key, enabled }`         | Main menu only. A command of Chrome's own menu    |
+| Item | Swift | Rust | What it is |
+| --- | --- | --- | --- |
+| Your own | `.item(id:label:enabled:checked:hidden:key:)` | `MenuItem::Item { id, label, enabled, checked, hidden, key }` | Reported by `id` when chosen |
+| A separator | `.separator` | `MenuItem::Separator` |  |
+| A submenu | `.submenu(label:role:items:)` | `MenuItem::Submenu { label, role, items }` | Up to four deep |
+| The system's | `.role(_:label:key:enabled:)` | `MenuItem::Role { role, label, key, enabled }` | Main menu only. Copy, Quit, Minimize and the like |
+| Chromium's | `.chromium(_:label:key:enabled:)` | `MenuItem::Chromium { command, label, key, enabled }` | Main menu only. A command of Chrome's own menu |
 
-An item's `key` is named as a page's `KeyboardEvent.key` names it, with
-modifiers. That is one character, such as `"t"`, `"["` or `"+"`, or a key's
-name, such as `"Enter"`, `"ArrowLeft"` or `"F5"`. An upper-case letter means the
-letter with Shift. The modifier `.primary`, `MenuModifiers::PRIMARY` in Rust, is
-⌘ on macOS and Control elsewhere. IDs are unique in a menu, and labels are shown
-as given.
+An item's `key` is named as a page's `KeyboardEvent.key` names it, with modifiers. That is one character, such as `"t"`, `"["` or `"+"`, or a key's name, such as `"Enter"`, `"ArrowLeft"` or `"F5"`. An upper-case letter means the letter with Shift. The modifier `.primary`, `MenuModifiers::PRIMARY` in Rust, is ⌘ on macOS and Control elsewhere. IDs are unique in a menu, and labels are shown as given.
 
 ## The main menu
 
@@ -56,55 +46,22 @@ appDelegate.menuCommand = { id, browser in
 }
 ```
 
-In Rust the calls are on `MainThread`: `set_main_menu`, `update_main_menu_item`
-and `show_context_menu`. Chosen items reach `App::menu_command`.
-`MenuItem::item`, `submenu`, `role` and `chromium` make the common items, such
-as `MenuItem::item("new-window", "New Window")`,
-`MenuItem::role(MenuRole::Quit)` and
-`MenuItem::chromium(ChromiumCommand::NewTab)`.
+In Rust the calls are on `MainThread`: `set_main_menu`, `update_main_menu_item` and `show_context_menu`. Chosen items reach `App::menu_command`. `MenuItem::item`, `submenu`, `role` and `chromium` make the common items, such as `MenuItem::item("new-window", "New Window")`, `MenuItem::role(MenuRole::Quit)` and `MenuItem::chromium(ChromiumCommand::NewTab)`.
 
-- **Your items** reach `menuCommand` with their ID, and the Browser in the key
-  window if there is one. To change one in place, call
-  `WrenApp.updateMainMenuItem(.item(id:…))` with a new label, enabled, checked
-  or hidden state, or key. A `hidden` item is not shown, but its key still runs
-  it. That gives a command shown by another item a second key.
-- **The system's items** do what the platform does for them. Copy copies in
-  whatever has the keyboard, a page or your own field. Quit quits. A submenu
-  with the role `.services`, `.window` or `.help` is the system's own. The
-  system fills Services, lists your windows in Window, and puts its search field
-  in Help.
-- **Chromium's items** are the commands of Chrome's own menu, for the Browser in
-  the key window. Wren enables them when Chrome would. With no Browser in the
-  key window they are disabled. Find, Find Next and Find Previous open a find,
-  in Chromium's find bar or yours. Commands whose UI Wren does not have, such as
-  Name Window, are not offered. Nor are commands that would open a Browser you
-  did not ask for, such as New Window.
-- **Labels and keys** of the system's and Chromium's items are Chrome's own, in
-  the user's language, unless you give yours.
-- **Keys** run their item while a page has focus too, because a key the page
-  does not use goes to the menu. Give each key to one item. AppKit takes the key
-  away from the second item that has it.
-- **Chrome's keys outside its menu** work in a tab as in Chrome, whatever menu
-  you set. ⌘← and ⌘→ go back and forward when the page does not use them. In a
-  text field they move the caret. You need no item for them.
+- **Your items** reach `menuCommand` with their ID, and the Browser in the key window if there is one. To change one in place, call `WrenApp.updateMainMenuItem(.item(id:…))` with a new label, enabled, checked or hidden state, or key. A `hidden` item is not shown, but its key still runs it. That gives a command shown by another item a second key.
+- **The system's items** do what the platform does for them. Copy copies in whatever has the keyboard, a page or your own field. Quit quits. A submenu with the role `.services`, `.window` or `.help` is the system's own. The system fills Services, lists your windows in Window, and puts its search field in Help.
+- **Chromium's items** are the commands of Chrome's own menu, for the Browser in the key window. Wren enables them when Chrome would. With no Browser in the key window they are disabled. Find, Find Next and Find Previous open a find, in Chromium's find bar or yours. Commands whose UI Wren does not have, such as Name Window, are not offered. Nor are commands that would open a Browser you did not ask for, such as New Window.
+- **Labels and keys** of the system's and Chromium's items are Chrome's own, in the user's language, unless you give yours.
+- **Keys** run their item while a page has focus too, because a key the page does not use goes to the menu. Give each key to one item. AppKit takes the key away from the second item that has it.
+- **Chrome's keys outside its menu** work in a tab as in Chrome, whatever menu you set. ⌘← and ⌘→ go back and forward when the page does not use them. In a text field they move the caret. You need no item for them.
 
-The call replaces the menu Wren installed at startup (`Startup.menu`). After it,
-do not edit `NSApp.mainMenu` yourself. An app that would rather build an
-`NSMenu` still may, and then does not call `setMainMenu`. If a menu is open, the
-change waits until it closes.
+The call replaces the menu Wren installed at startup (`Startup.menu`). After it, do not edit `NSApp.mainMenu` yourself. An app that would rather build an `NSMenu` still may, and then does not call `setMainMenu`. If a menu is open, the change waits until it closes.
 
 ## Asking before quitting
 
-Chrome's Warn Before Quitting is on unless the user or policy turned it off.
-While it is on, the Quit role's key, ⌘Q, warns before quitting, as in Chrome.
-Choosing Quit with the pointer, the Dock's Quit, logging out and
-`WrenApp.quit()` never warn. A page's `beforeunload`, or downloads in progress,
-can still stop the quit afterwards.
+Chrome's Warn Before Quitting is on unless the user or policy turned it off. While it is on, the Quit role's key, ⌘Q, warns before quitting, as in Chrome. Choosing Quit with the pointer, the Dock's Quit, logging out and `WrenApp.quit()` never warn. A page's `beforeunload`, or downloads in progress, can still stop the quit afterwards.
 
-The warning is Chromium's "Hold ⌘Q to Quit" unless you show your own. Answer
-`quitPrompt` with `.app`, ask, then answer the prompt. `.none` quits without a
-warning, and `.chromium`, or no `quitPrompt`, keeps Chromium's. Like `popover`,
-it runs inside Chromium's call, so ask afterwards:
+The warning is Chromium's "Hold ⌘Q to Quit" unless you show your own. Answer `quitPrompt` with `.app`, ask, then answer the prompt. `.none` quits without a warning, and `.chromium`, or no `quitPrompt`, keeps Chromium's. Like `popover`, it runs inside Chromium's call, so ask afterwards:
 
 ```swift
 appDelegate.quitPrompt = { prompt in
@@ -132,22 +89,11 @@ fn quit_prompt(&self, mt: MainThread, prompt: &QuitPrompt) -> PopoverAnswer {
 }
 ```
 
-The quit waits for the answer. ⌘Q pressed again while your prompt is open asks
-`quitPrompt` again, with `again` set and the same `id`, as Chrome's warning
-quits on a second press. Answer `.none` to quit, and your prompt goes with the
-app; any other answer keeps it open. A quit from elsewhere goes on while your
-prompt is open.
+The quit waits for the answer. ⌘Q pressed again while your prompt is open asks `quitPrompt` again, with `again` set and the same `id`, as Chrome's warning quits on a second press. Answer `.none` to quit, and your prompt goes with the app; any other answer keeps it open. A quit from elsewhere goes on while your prompt is open.
 
-The setting is state. `WrenApp.quitWarning` says whether it is on, and whether
-policy sets it (`managed`). `WrenApp.setQuitWarning(_:)` changes it, and throws
-`.notAllowed` when policy sets it. In Rust they are `mt.quit_warning()` and
-`mt.set_quit_warning(on)`. Chrome's own menu item, in `.chromium`'s menu, and
-`chrome://settings/appearance` change it too, and a `.quitWarning` change
-reports every change. To offer it in your own menu, add an item of your own,
-checked from `quitWarning`, as Chrome's "Warn Before Quitting (⌘Q)" above Quit.
+The setting is state. `WrenApp.quitWarning` says whether it is on, and whether policy sets it (`managed`). `WrenApp.setQuitWarning(_:)` changes it, and throws `.notAllowed` when policy sets it. In Rust they are `mt.quit_warning()` and `mt.set_quit_warning(on)`. Chrome's own menu item, in `.chromium`'s menu, and `chrome://settings/appearance` change it too, and a `.quitWarning` change reports every change. To offer it in your own menu, add an item of your own, checked from `quitWarning`, as Chrome's "Warn Before Quitting (⌘Q)" above Quit.
 
-A browser drawn in HTML can ask in its page, and send its answer back as a
-[message](messages.md).
+A browser drawn in HTML can ask in its page, and send its answer back as a [message](messages.md).
 
 ## Context menus
 
@@ -164,24 +110,66 @@ try WrenApp.showContextMenu([
 }
 ```
 
-`point` is in points from the top left of the view you name. That view is a web
-view's (`webView.view`), a tab's (`tab.view`) or one of your own, in a window. A
-web view's page reads the `clientX` and `clientY` of its `contextmenu` event,
-which are that point at 100% zoom. Over a web view's or a tab's view, the menu
-belongs to its page, as Chrome's page menu does. So the system's own items, such
-as Services, act on the page.
+`point` is in points from the top left of the view you name. That view is a web view's (`webView.view`), a tab's (`tab.view`) or one of your own, in a window. A web view's page reads the `clientX` and `clientY` of its `contextmenu` event, which are that point at 100% zoom. Over a web view's or a tab's view, the menu belongs to its page, as Chrome's page menu does. So the system's own items, such as Services, act on the page.
 
-The call returns at once, and the menu opens from the event loop. The closure
-runs once, after the menu has closed and the chosen item was reported. It gets
-the item's ID, or nil if the user dismissed the menu, another context menu
-replaced it, or its web view was destroyed or its tab closed.
+The call returns at once, and the menu opens from the event loop. The closure runs once, after the menu has closed and the chosen item was reported. It gets the item's ID, or nil if the user dismissed the menu, another context menu replaced it, or its web view was destroyed or its tab closed.
 
-A context menu shows keys beside the labels, as a hint. It does not listen for
-them.
+A context menu shows keys beside the labels, as a hint. It does not listen for them.
 
-A web view's page cannot call Wren itself. It sends its items and the point to
-your app as a [message](messages.md). Your handler shows the menu and answers
-with the choice, and the page awaits it. That takes a few lines on each side.
+A web view's page cannot call Wren itself. It sends its items and the point to your app as a [message](messages.md). Your handler shows the menu and answers with the choice, and the page awaits it. That takes a few lines on each side.
 
-A text field in a web view has Wren's own editing menu, as
-[Web views](web-views.md#a-bare-page) describes. A tab's page has Chromium's.
+A text field in a web view has Wren's own editing menu, as [Web views](web-views.md#a-bare-page) describes. A tab's page has Chromium's.
+
+## Copy and paste of your own
+
+A menu item of yours that copies or pastes, such as Copy Page Address or Paste and Go, goes through Chromium's clipboard, as Chrome's commands do. So it needs no platform call, and a browser drawn in HTML does it in its host's bridge. The C side is [`WrenClipboard.h`](../include/WrenClipboard.h). The system's Cut, Copy and Paste roles still go to whatever has focus.
+
+A write replaces what the clipboard held. Give text, a URL with its title, or both. A URL alone is also written as its text, so a paste into a plain text field gives the address. Set `offTheRecord` for a copy from an off-the-record Profile's window, as Chromium does for a copy from an incognito page. It keeps the copy out of clipboard history and on this Mac, and macOS deletes it from the clipboard 5 minutes later. Set `concealed` for a password.
+
+```swift
+func copyAddress(of tab: BrowserTab, in browser: Browser) throws {
+    try WrenApp.writeClipboard(ClipboardData(
+        url: tab.url, urlTitle: tab.title,
+        offTheRecord: browser.profile?.kind == .offTheRecord))
+}
+```
+
+In Rust:
+
+```rust
+fn copy_address(mt: MainThread, tab: BrowserTab, browser: &Browser) -> Result<(), Error> {
+    mt.write_clipboard(&ClipboardData {
+        url: Some(tab.url()),
+        url_title: Some(tab.title()),
+        off_the_record: browser.profile().map(|p| p.kind()) == Some(ProfileKind::OffTheRecord),
+        ..Default::default()
+    })
+}
+```
+
+A read answers later, from the event loop. Ask only for the kinds you use. A kind the clipboard does not hold is nil. Read only when the person asks, from a command such as Paste and Go. On a Mac, macOS may ask the person whether your app may paste before the read, and a read to update a menu would ask too. So leave such an item enabled. Chrome's Paste and Go reads the text first, then a URL, and does nothing for concealed data:
+
+```swift
+WrenApp.readClipboard([.text, .url]) { result in
+    guard case .success(let data) = result, !data.concealed,
+        let text = data.text ?? data.url
+    else { return }
+    go(to: text)  // As the address field does on Return.
+}
+```
+
+In Rust:
+
+```rust
+mt.read_clipboard(ClipboardKinds::TEXT | ClipboardKinds::URL, |result| {
+    let Ok(data) = result else { return };
+    if data.concealed {
+        return;
+    }
+    if let Some(text) = data.text.or(data.url) {
+        go_to(&text); // As the address field does on Return.
+    }
+});
+```
+
+Wren reads and writes text and URLs only. HTML, RTF, images and file names are not offered yet, and nothing tells you when the clipboard changes.

@@ -15,8 +15,8 @@
 //
 // - A Profile's downloads are the ones Chrome's bubble lists. That is those
 //   of the last 24 hours, at most 30. Downloads in progress come first, then
-//   paused ones, then the rest, newest first. chrome://downloads has the whole
-//   history.
+//   paused ones, then the rest, newest first. The whole history, as
+//   chrome://downloads lists it, is below.
 // - An off-the-record Profile's list also has its original Profile's
 //   downloads, as Chrome's incognito windows do.
 // - Each Browser has Chrome's download button: whether Chrome would show it,
@@ -76,9 +76,9 @@ typedef enum WrenDownloadFailure {
   WREN_DOWNLOAD_FAILURE_CRASH = 5,
 } WrenDownloadFailure;
 
-// What the user may do to a download now, as Chrome's bubble offers it.
-// WrenDownloadState.actions holds these as bits. Wren_DoDownloadAction takes
-// one.
+// What the user may do to a download now, as Chrome's bubble offers it, and
+// chrome://downloads's Remove. WrenDownloadState.actions holds these as bits.
+// Wren_DoDownloadAction takes one.
 typedef enum WrenDownloadAction {
   WREN_DOWNLOAD_PAUSE = 1u << 0,
   WREN_DOWNLOAD_RESUME = 1u << 1,
@@ -97,6 +97,11 @@ typedef enum WrenDownloadAction {
   WREN_DOWNLOAD_DISCARD = 1u << 7,
   // Downloads a failed file again from the start.
   WREN_DOWNLOAD_RETRY = 1u << 8,
+  // Takes the download off the Profile's lists and its history, as Remove
+  // from List on chrome://downloads, with no Undo. The file stays. Offered
+  // once the download is not in progress or paused, with no warning
+  // unanswered, where policy allows deleting history.
+  WREN_DOWNLOAD_REMOVE = 1u << 9,
 } WrenDownloadAction;
 
 typedef struct WrenDownloadState {
@@ -122,18 +127,28 @@ typedef struct WrenDownloadState {
   // The tab that started the download. WREN_NO_TAB if a web view's page
   // started it, if the tab has closed, or if it is from a past session.
   WrenTabID tab;
+  // When the download started and, once done, when it finished, in
+  // milliseconds since 1970, UTC. end_ms is 0 for a download not done: in
+  // progress, cancelled or failed.
+  int64_t start_ms;
+  int64_t end_ms;
+  // True if an off-the-record Profile made the download. Only that Profile's
+  // lists have it, beside its original's downloads; chrome://downloads marks
+  // it "In Incognito".
+  bool off_the_record;
 } WrenDownloadState;
 
 // The number of the Profile's downloads, as listed above, in order.
 //
-// Once the app has read them, WREN_CHANGE_DOWNLOADS reports each change: a
-// download added or gone, or a download's progress or state.
+// Once the app has read them, WREN_CHANGE_DOWNLOADS reports each change to
+// the list: a download added or gone, or one entering, leaving or moving in
+// it. WREN_CHANGE_DOWNLOAD reports a download's progress or state.
 WREN_API size_t Wren_GetDownloadCount(WrenProfile* profile);
 // The download at `index`. WREN_NO_DOWNLOAD past the end.
 WREN_API WrenDownloadID Wren_GetDownloadAt(WrenProfile* profile, size_t index);
 
 // Returns WREN_ERROR_DOWNLOAD_UNAVAILABLE for a download Chromium no longer
-// has, because it was discarded or its Profile closed.
+// has, because it was discarded or removed, or its Profile closed.
 WREN_API WrenResult Wren_GetDownloadState(WrenDownloadID download,
                                           WrenDownloadState* state);
 // Copies the file's name, as Chrome shows it.
@@ -154,6 +169,48 @@ WREN_API size_t Wren_CopyDownloadURL(WrenDownloadID download,
 // when `action` is not among the download's actions, and inside on_popover.
 WREN_API WrenResult Wren_DoDownloadAction(WrenDownloadID download,
                                           WrenDownloadAction action);
+
+// --- The whole history ------------------------------------------------------
+
+typedef struct WrenDownloadHistoryState {
+  // True once Chromium has loaded the Profile's history, and for an
+  // off-the-record Profile its original's. Until then the history has what
+  // Chromium has so far. WREN_CHANGE_DOWNLOADS reports the load.
+  bool loaded;
+  // True if the administrator's policy lets the user delete history. This is
+  // Chromium's AllowDeletingBrowserHistory. When it is false, removing and
+  // clearing return WREN_ERROR_NOT_ALLOWED. Read when asked; not reported.
+  bool removable;
+} WrenDownloadHistoryState;
+
+// Reads the state of the Profile's download history.
+WREN_API WrenResult
+Wren_GetDownloadHistoryState(WrenProfile* profile,
+                             WrenDownloadHistoryState* state);
+
+// Copies up to `capacity` of the Profile's downloads, as chrome://downloads
+// lists them, newest start first, and returns how many there are. An
+// off-the-record Profile's history has its original's too. Call it with
+// `capacity` 0 for the count, then again to fill: within one turn the list
+// cannot change between.
+//
+// Once the app has read it, WREN_CHANGE_DOWNLOADS reports each change to the
+// list, and WREN_CHANGE_DOWNLOAD each download's progress or state.
+WREN_API size_t Wren_GetDownloadHistory(WrenProfile* profile,
+                                        WrenDownloadID* downloads,
+                                        size_t capacity);
+
+// As Clear All on chrome://downloads, with no Undo: removes every download
+// of the history but those in progress or paused. One with a warning
+// unanswered is removed and its unfinished file deleted. An off-the-record
+// Profile's clear removes its original's downloads too. Returns
+// WREN_ERROR_NOT_ALLOWED where policy forbids deleting history, and inside
+// on_popover.
+//
+// Wren_ClearBrowsingData's WREN_BROWSING_DATA_DOWNLOADS differs: it clears
+// a time period of one Profile, downloads chrome://downloads does not list
+// included.
+WREN_API WrenResult Wren_ClearDownloadHistory(WrenProfile* profile);
 
 // --- The download button ----------------------------------------------------
 

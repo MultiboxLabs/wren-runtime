@@ -56,7 +56,8 @@ WREN_API WrenResult Wren_AddTab(WrenBrowser* browser,
 WREN_API WrenResult Wren_NewTab(WrenBrowser* browser);
 
 WREN_API WrenResult Wren_ActivateTab(WrenTabID tab);
-// Asks the tab to close. Its page may cancel the close with beforeunload. When
+// Asks the tab to close. Its page may cancel the close with beforeunload
+// (WrenTabState.may_ask_before_close). When
 // a Browser's last tab closes, the Browser closes too (WrenBrowser.h).
 WREN_API WrenResult Wren_CloseTab(WrenTabID tab);
 // Loads `url` in the tab.
@@ -86,6 +87,30 @@ typedef enum WrenTabStatus {
   // example.com…", while there is no link to show.
   WREN_TAB_STATUS_LOADING = 2,
 } WrenTabStatus;
+
+// What a tab is doing that Chrome marks on its tab. Bits of
+// WrenTabState.alerts. Chrome shows one icon: the first of these that
+// applies, in this order, with the muted speaker for an audible tab that is
+// muted.
+typedef enum WrenTabAlert {
+  // The page captures a window or a screen.
+  WREN_TAB_ALERT_CAPTURING_SCREEN = 1u << 0,
+  // Something captures the page, such as a call it is shared to.
+  WREN_TAB_ALERT_BEING_CAPTURED = 1u << 1,
+  // The page records from a microphone, a camera, or both.
+  WREN_TAB_ALERT_MICROPHONE = 1u << 2,
+  WREN_TAB_ALERT_CAMERA = 1u << 3,
+  // The page is connected to a device, or scans for Bluetooth ones.
+  WREN_TAB_ALERT_BLUETOOTH = 1u << 4,
+  WREN_TAB_ALERT_BLUETOOTH_SCANNING = 1u << 5,
+  WREN_TAB_ALERT_USB = 1u << 6,
+  WREN_TAB_ALERT_HID = 1u << 7,
+  WREN_TAB_ALERT_SERIAL = 1u << 8,
+  // A video of the page plays in Picture in Picture.
+  WREN_TAB_ALERT_PICTURE_IN_PICTURE = 1u << 9,
+  // The page plays sound, or did in the last 2 seconds, muted or not.
+  WREN_TAB_ALERT_AUDIBLE = 1u << 10,
+} WrenTabAlert;
 
 typedef struct WrenTabState {
   bool loading;
@@ -117,6 +142,27 @@ typedef struct WrenTabState {
   // leaves the element, or is replaced by a discard, until the new page is in
   // an element.
   bool in_element;
+  // When the tab was last on screen, in milliseconds since 1970, UTC: the
+  // current time while it is shown, and the time it was hidden once it is
+  // not. A tab in a minimised window, on another Space or covered by other
+  // windows is hidden. A restored tab keeps its time from the launch before
+  // until it is shown. A tab added in the background has the time it was
+  // made. No change is reported: read it when deciding.
+  int64_t last_active_ms;
+  // WrenTabAlert bits. WREN_TAB_FIELD_ALERTS reports a change.
+  uint32_t alerts;
+  // True while the tab's sound is muted: by Wren_SetTabMuted, by its site's
+  // sound setting (WREN_CHROMIUM_COMMAND_MUTE_SITE) or by an extension.
+  // WREN_TAB_FIELD_MUTED reports a change.
+  bool muted;
+  // True if closing the tab may show its page's "Leave site?" prompt: a frame
+  // of the page has a beforeunload handler, and the user has used that frame.
+  // The handler may still let the tab close. No change is reported: read it
+  // when deciding.
+  bool may_ask_before_close;
+  // True while the tab is kept out of the session (Wren_SetTabSessionExcluded).
+  // WREN_TAB_FIELD_SESSION_EXCLUDED reports a change.
+  bool session_excluded;
 } WrenTabState;
 
 WREN_API WrenResult Wren_GetTabState(WrenTabID tab, WrenTabState* state);
@@ -139,6 +185,74 @@ WREN_API size_t Wren_CopyTabFaviconPNG(WrenTabID tab,
                                        uint8_t* buffer,
                                        size_t size);
 
+// How Wren_CaptureTab encodes its picture.
+typedef enum WrenImageFormat {
+  WREN_IMAGE_PNG = 0,
+  WREN_IMAGE_JPEG = 1,
+} WrenImageFormat;
+
+typedef struct WrenCaptureOptions {
+  // The largest the picture may be, in pixels. 0 sets no limit that way. The
+  // picture keeps the page's aspect ratio, fits inside both limits, and is
+  // never larger than the page's own pixels: its view's size at its screen's
+  // scale.
+  int max_width;
+  int max_height;
+  WrenImageFormat format;
+  // For JPEG, 1 to 100. 0 means 80. PNG ignores it.
+  int quality;
+  // Captures even where the DisableScreenshots policy is set, as Chrome's
+  // own hover-card pictures do. Set it only for a picture that stays in the
+  // app's own UI, such as a tab switcher, never for one the app shares or
+  // saves.
+  bool ignore_policy;
+} WrenCaptureOptions;
+
+// A picture of a tab's page.
+typedef struct WrenTabImage {
+  // The encoded picture, borrowed until the callback returns.
+  const uint8_t* data;
+  size_t size;
+  // In pixels.
+  int width;
+  int height;
+} WrenTabImage;
+
+// Receives the result of Wren_CaptureTab, from the event loop. `image` is
+// NULL unless `result` is WREN_OK.
+typedef void (*WrenTabImageCallback)(void* context,
+                                     WrenTabID tab,
+                                     const WrenTabImage* image,
+                                     WrenResult result);
+
+// Takes a picture of the tab's page, as it draws it after the call, and
+// gives it to `callback` from the event loop. The call returns at once, and
+// may be made anywhere, inside any callback. `callback` is required. It is
+// not called before on_ready, or once the app quits. NULL `options` means a
+// PNG at the page's own size.
+//
+// The tab may be shown or in the background, in any Browser, off the record
+// too. A background page draws for the picture but stays hidden: it is not
+// told it is shown, and no visibilitychange fires. A tab still loading gives
+// what is drawn so far. A tab that has never drawn, such as one a restore left
+// in the background, starts loading, and may give WREN_ERROR_NO_IMAGE: ask
+// again once it has loaded. The picture is the page alone: no docked DevTools,
+// no app UI and none of Chromium's windows over it.
+//
+// `callback` gets one of these errors without a picture:
+//
+// - WREN_ERROR_INVALID_ARGUMENT for a negative size, an unknown format or a
+//   quality past 100.
+// - WREN_ERROR_TAB_UNAVAILABLE if no open tab has the ID, or it closes first.
+// - WREN_ERROR_NOT_ALLOWED where the DisableScreenshots policy is set for the
+//   tab's Profile, unless `options->ignore_policy` is true.
+// - WREN_ERROR_NO_IMAGE for a tab that is discarded, crashed or of no size,
+//   or that draws nothing within 5 seconds. WrenTabState tells which.
+WREN_API void Wren_CaptureTab(WrenTabID tab,
+                              const WrenCaptureOptions* options,
+                              WrenTabImageCallback callback,
+                              void* context);
+
 // Moves the tab to `index` within its Browser. Chromium keeps pinned tabs
 // first and a group's tabs together, so the tab may end up at another index.
 // Wren_GetTabIndex gives the index it ends up at.
@@ -146,6 +260,138 @@ WREN_API WrenResult Wren_MoveTab(WrenTabID tab, int index);
 // Pins or unpins the tab. Pinning moves the tab to the end of the pinned
 // tabs. Unpinning moves it to the start of the others.
 WREN_API WrenResult Wren_SetTabPinned(WrenTabID tab, bool pinned);
+// Mutes or unmutes the tab's sound, as Chrome's speaker on a tab does. It
+// unmutes a tab its site's sound setting muted, too. Chromium does not keep
+// it in the session.
+WREN_API WrenResult Wren_SetTabMuted(WrenTabID tab, bool muted);
+
+// Keeps the tab out of the session, or puts it back. Use it for a tab the app
+// makes again from its own records each launch, which the session would
+// otherwise restore a second time.
+//
+// - The session the next launch restores (Wren_RestoreLastSession) leaves the
+//   tab out. So does Wren_GetLastSession's count. Its window keeps the other
+//   tabs, in their order, and the active tab is the nearest kept tab, to the
+//   right first. A split with one tab left out restores the other as a plain
+//   tab. A window of only such tabs is not restored.
+// - Closed, the tab is kept in memory: Reopen Closed Tab brings it back in
+//   this launch, still kept out, with its persistent ID. Its closed tab is
+//   never written to disk. A closed window or group leaves it out.
+// - It stays out when it moves to another Browser, from a popup too, and when
+//   Chromium discards its page.
+// - Its history is kept, and its persistent ID's records
+//   (Wren_CopyTabPersistentID) are as for any tab.
+// - A tab in a group is also in Chrome's saved copy of that group, which
+//   brings the group's tabs back when the group is restored, this tab too.
+//   Keep such a tab out of groups.
+//
+// Wren cannot keep a tab out before Chromium adds it, so call this right after
+// Wren_AddTab. Wren takes what was written for the tab out of the session at
+// once, before it reaches disk. Each call rewrites the Profile's session, so
+// a call per tab for hundreds of tabs costs more than for a few. An
+// off-the-record tab may be kept out too; it has no session anyway.
+WREN_API WrenResult Wren_SetTabSessionExcluded(WrenTabID tab, bool excluded);
+
+// Moves tabs to `target`, another Browser. The tabs keep their pages, their
+// history, their IDs and their views. What a tab carries comes with it: a
+// dialog over its page, and DevTools docked to it.
+//
+// - The tabs must all be in one Browser. Both Browsers must be normal
+//   (WREN_BROWSER_NORMAL) and of the same Profile. An off-the-record Profile
+//   is its own, apart from its original.
+// - `options->index` is where the first tab goes in `target`. The others
+//   follow it, in the order they had in their Browser. -1, or an index past
+//   the end, puts them at the end. NULL `options` puts them at the end and
+//   activates one.
+// - Pinned tabs stay pinned, and go among the target's pinned tabs. The
+//   others go after those.
+// - A group all of whose tabs move goes with them, keeping its ID, title,
+//   colour and collapsed state. Tabs that leave others of their group behind
+//   leave the group.
+// - Naming either tab of a split moves the whole split, keeping its ID.
+// - A tab or split that lands between two tabs of one group joins that
+//   group, as with Wren_MoveTab. A whole group that would land inside another
+//   goes to that group's nearer end.
+// - With `options->activate`, the tabs' Browser's active tab becomes the
+//   target's active tab if it moves, and otherwise the first tab moved does.
+//   Without it, the target keeps its active tab. The tabs' Browser picks a
+//   new active tab, as when a tab closes.
+// - Wren does not bring the target's window forward.
+// - If every tab of their Browser moves, that Browser closes after the call
+//   returns, as when its last tab closes. on_browser_closed reports it.
+//
+// Nothing moves when the call fails. It returns WREN_ERROR_INVALID_ARGUMENT
+// if `count` is 0, an ID repeats, the tabs are in different Browsers, or
+// `target` is their own Browser. It returns WREN_ERROR_TAB_UNAVAILABLE if a
+// tab is not open, and WREN_ERROR_CLOSED if either Browser has closed or is
+// closing. It returns WREN_ERROR_NOT_ALLOWED if either Browser is not normal,
+// or if their Profiles differ.
+WREN_API WrenResult Wren_MoveTabsToBrowser(const WrenTabID* tabs,
+                                           size_t count,
+                                           WrenBrowser* target,
+                                           const WrenTabOptions* options);
+// Moves tabs to a new normal Browser of their Profile, as
+// Wren_MoveTabsToBrowser moves them. The tabs' Browser's active tab becomes
+// the new Browser's active tab if it moves, and otherwise the first tab moved
+// does. The app shows the new Browser as it shows one it creates
+// (Wren_CreateBrowser). on_browser_opened does not run for it.
+//
+// `callback` runs from the event loop. It receives the new Browser, with one
+// reference, or NULL and the error. The errors are those of
+// Wren_MoveTabsToBrowser, and WREN_ERROR_NOT_ALLOWED if the tabs would leave
+// their Browser with none, or if Chromium's policy forbids a new window for
+// the Profile.
+WREN_API void Wren_MoveTabsToNewBrowser(const WrenTabID* tabs,
+                                        size_t count,
+                                        WrenBrowserCallback callback,
+                                        void* context);
+
+// Moves the tab of a popup into `target`, a normal Browser of its Profile, as
+// Chrome's Show as Tab does. The page keeps its history, its state and
+// window.opener, and does not load again. A dialog over the page comes with
+// it, and so does its DevTools.
+//
+// The tab cannot keep its ID across kinds of Browser: it becomes a new tab,
+// with a new ID and a new view. `*moved_tab` receives the new ID. Its
+// persistent ID (Wren_CopyTabPersistentID) stays the same.
+//
+// - The tab's Browser must be WREN_BROWSER_POPUP or WREN_BROWSER_APP_POPUP.
+// - `options` as for Wren_MoveTabsToBrowser: the tab is never pinned, and
+//   joins a group it lands inside. NULL `options` appends it and activates
+//   it.
+// - A page in full screen leaves it.
+// - Wren does not bring the target's window forward.
+// - The popup, left with no tabs, closes after the call returns.
+//   on_browser_closed reports it.
+//
+// Nothing moves when the call fails. It returns WREN_ERROR_INVALID_ARGUMENT
+// if `moved_tab` is NULL or `target` is the tab's own Browser,
+// WREN_ERROR_TAB_UNAVAILABLE if no open tab has the ID, and WREN_ERROR_CLOSED
+// if either Browser has closed or is closing. It returns
+// WREN_ERROR_NOT_ALLOWED if the tab's Browser is of another kind, or if
+// `target` is not normal or is of another Profile.
+WREN_API WrenResult Wren_MovePopupTabToBrowser(WrenTabID tab,
+                                               WrenBrowser* target,
+                                               const WrenTabOptions* options,
+                                               WrenTabID* moved_tab);
+// Receives the new Browser of Wren_MovePopupTabToNewBrowser, with one
+// reference, and the moved tab's new ID. On an error, NULL, WREN_NO_TAB and
+// the error.
+typedef void (*WrenMovedTabCallback)(void* context,
+                                     WrenBrowser* browser,
+                                     WrenTabID tab,
+                                     WrenResult result);
+// Moves the tab of a popup into a new normal Browser of its Profile, as
+// Wren_MovePopupTabToBrowser moves it. The tab is the new Browser's only tab,
+// and active. The app shows the new Browser as it shows one it creates
+// (Wren_CreateBrowser). on_browser_opened does not run for it.
+//
+// `callback` runs from the event loop. The errors are those of
+// Wren_MovePopupTabToBrowser, and WREN_ERROR_NOT_ALLOWED if Chromium's policy
+// forbids a new window for the Profile.
+WREN_API void Wren_MovePopupTabToNewBrowser(WrenTabID tab,
+                                            WrenMovedTabCallback callback,
+                                            void* context);
 
 // --- Navigation -------------------------------------------------------------
 
@@ -185,6 +431,17 @@ WREN_API WrenResult Wren_AddTabsToGroup(const WrenTabID* tabs,
 // it.
 WREN_API WrenResult Wren_UngroupTabs(const WrenTabID* tabs, size_t count);
 
+// Moves the group's tabs together within its Browser, as dragging its header
+// in Chrome's tab strip does. The group keeps its ID, title, colour and
+// collapsed state, and a split in it stays a split.
+//
+// `index` is where the group's first tab goes, counted among the tabs that do
+// not move. Wren makes it valid as Chrome's strip does: never among the pinned
+// tabs or past the end, never inside another group but at its nearer end, and
+// never between a split's two tabs but at the split's nearer end.
+// Wren_GetTabIndex gives where the group's tabs end up.
+WREN_API WrenResult Wren_MoveTabGroup(WrenTabGroupID group, int index);
+
 // Returns the group's Browser, borrowed. NULL if no open group has this ID.
 WREN_API WrenBrowser* Wren_GetTabGroupBrowser(WrenTabGroupID group);
 // Copies the group's title, in UTF-8, and returns the length needed, including
@@ -213,9 +470,11 @@ WREN_API WrenResult Wren_SetTabGroupVisuals(WrenTabGroupID group,
 // - Chromium draws the page only while the view is in a window, no ancestor
 //   of the view is hidden, and the window is not covered. Otherwise the page
 //   is hidden and stops drawing. Remove or hide the views of tabs that are not
-//   on screen.
-// - The page is the view's size. Set the view's frame or its autoresizing
-//   mask.
+//   on screen. Wren_CaptureTab draws a hidden page once, for its picture.
+// - The page is the view's size. A view taken out of its window keeps its
+//   size. While the app has given the view no size, a page that left a
+//   <wren-view> element keeps the element's size. Set the view's
+//   frame or its autoresizing mask.
 // - Give the view, and the side panel view, a whole number of points each
 //   way. Chromium sizes a page in whole points and drops any fraction. In a
 //   view 600.5 points tall the page is 600 points tall, and whatever is behind
@@ -223,7 +482,8 @@ WREN_API WrenResult Wren_SetTabGroupVisuals(WrenTabGroupID group,
 // - The page's scale, its devicePixelRatio, follows the window's screen.
 // - The view stays the same for the whole life of the tab. That includes when
 //   Chromium replaces the page inside it by discarding it, and when the tab
-//   moves to another Browser.
+//   moves to another Browser. A popup's tab that moves to a normal Browser
+//   becomes a new tab, with a new view (Wren_MovePopupTabToBrowser).
 
 // Returns the tab's NSView, or NULL. Borrowed, and valid until the tab closes.
 WREN_API void* Wren_GetTabView(WrenTabID tab);
@@ -296,6 +556,19 @@ WREN_API WrenResult Wren_SetSplitLayout(WrenSplitID split,
                                         WrenSplitLayout layout);
 // Swaps the two tabs' places.
 WREN_API WrenResult Wren_SwapSplitTabs(WrenSplitID split);
+
+// Moves both tabs of the split together within its Browser, as dragging a
+// split in Chrome's tab strip does. The split keeps its ID, layout, ratio and
+// pinning.
+//
+// `index` is where the split's first tab goes, counted among the tabs that do
+// not move. Wren makes it valid: among the pinned tabs for a pinned split and
+// after them for another, and never between another split's two tabs but at
+// its nearer end. The split's group follows Chromium's rule for a tab: it
+// joins a group it lands inside, keeps its own while a tab beside it is in
+// that group, and otherwise leaves it. A split that is its group's only tabs
+// keeps the group and moves it. Wren_GetTabIndex gives where its tabs end up.
+WREN_API WrenResult Wren_MoveTabSplit(WrenSplitID split, int index);
 
 // --- DevTools ---------------------------------------------------------------
 //

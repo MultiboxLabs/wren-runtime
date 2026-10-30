@@ -172,7 +172,8 @@ struct WrenPopoverRequest {
   bool newly_bookmarked;
   // For TOAST, Chromium's name for the toast, such as "LinkCopied" or
   // "AddedToReadingList". That is the toast's ID in Chromium without its
-  // "k". NULL for any other kind.
+  // "k". For one of the app's own, its name (WrenToastOptions.name), or
+  // "Embedder". NULL for any other kind.
   const char* toast;
   // For DOWNLOADS, the download whose warning to show, or WREN_NO_DOWNLOAD
   // for the list.
@@ -1133,9 +1134,9 @@ WREN_API WrenResult Wren_ChooseToastMenuItem(WrenPopoverID popover,
 // navigates, or when the next toast comes.
 //
 // Before it shows, Wren asks on_popover as for Chromium's toasts, as
-// WREN_POPOVER_TOAST with the toast "Embedder". The answer may be Chromium's,
-// the app's own, or none. The app's own toast reads its text and icon as any
-// toast does.
+// WREN_POPOVER_TOAST with the toast the app named, or "Embedder". The answer
+// may be Chromium's, the app's own, or none. The app's own toast reads its text
+// and icon as any toast does.
 
 typedef struct WrenToastOptions {
   // Required, and not empty. UTF-8.
@@ -1145,6 +1146,11 @@ typedef struct WrenToastOptions {
   // across or more looks sharp on a Retina display.
   const void* icon_png;
   size_t icon_png_size;
+  // Optional. The toast's name, in UTF-8, in place of "Embedder", which the
+  // app reads back as WrenPopoverRequest.toast and Wren_CopyToastName. NULL
+  // or empty gives "Embedder". Wren takes any name, so give names Chromium's
+  // own toasts do not use, such as "AddressCopied".
+  const char* name;
 } WrenToastOptions;
 
 // Shows one of the app's own toasts in the Browser.

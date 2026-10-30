@@ -5,9 +5,10 @@
 // Wren: extensions (C API). Wren.h includes this header. Wren.h also explains
 // threads, handles and strings.
 //
-// This header has three parts. Extension actions are the buttons extensions
+// This header has four parts. Extension actions are the buttons extensions
 // add to a toolbar. Installed extensions are the list Chrome's extensions page
 // shows. App extensions are the ones the app ships, which Wren installs.
+// Native messaging is how an extension talks to the app.
 
 #ifndef WREN_PUBLIC_WREN_EXTENSIONS_H_
 #define WREN_PUBLIC_WREN_EXTENSIONS_H_
@@ -143,19 +144,24 @@ WREN_API WrenResult Wren_ShowExtensionsMenu(WrenBrowser* browser);
 
 // --- Installed extensions ---------------------------------------------------
 //
-// The extensions installed in the Browser's Profile, whether turned on or off.
-// The list is the one Chrome's extensions page shows. It leaves out component
-// extensions, apps and themes. An extension that is turned off has no action.
+// The extensions installed in a Profile, whether turned on or off, with or
+// without a window. The list is the one Chrome's extensions page shows. It
+// leaves out component extensions, apps and themes. An extension that is
+// turned off has no action. An off-the-record Profile gives its original's,
+// as in Chrome.
 //
 // Calls name an extension by its ID. An ID that is not there gives
-// WREN_ERROR_INVALID_ARGUMENT. WREN_CHANGE_EXTENSION_ACTIONS reports changes
-// to this list too.
+// WREN_ERROR_INVALID_ARGUMENT. Until Chromium has loaded the Profile's
+// extensions, the list is empty. Once the app has read it,
+// WREN_CHANGE_EXTENSIONS reports each change, including each extension as it
+// loads. A Profile that has closed gives an empty list and
+// WREN_ERROR_CLOSED.
 
 // The number of installed extensions. They are in order of name.
-WREN_API size_t Wren_GetExtensionCount(WrenBrowser* browser);
+WREN_API size_t Wren_GetExtensionCount(WrenProfile* profile);
 // Copies the extension ID at `index`, or "" if there is none. The ID is
 // UTF-8. Returns the length needed, including the NUL.
-WREN_API size_t Wren_CopyExtensionID(WrenBrowser* browser,
+WREN_API size_t Wren_CopyExtensionID(WrenProfile* profile,
                                      size_t index,
                                      char* buffer,
                                      size_t size);
@@ -169,14 +175,23 @@ typedef struct WrenExtensionState {
   // any other extension that is off, Chrome's extensions page asks first, for
   // new permissions, or repairs it.
   bool can_change;
+  // True if the extension also runs in the Profile's off-the-record
+  // Profiles, as with Allow in Incognito on Chrome's extensions page.
+  bool allowed_in_incognito;
+  // True if the user may allow it in incognito or not, here or with that
+  // switch. Chrome's extensions page shows the switch only then: the
+  // extension's manifest does not refuse incognito, and the Profile may go
+  // off the record. Policy that keeps the user from turning the extension
+  // off does not lock this switch.
+  bool can_allow_in_incognito;
 } WrenExtensionState;
 
-WREN_API WrenResult Wren_GetExtensionState(WrenBrowser* browser,
+WREN_API WrenResult Wren_GetExtensionState(WrenProfile* profile,
                                            const char* extension_id,
                                            WrenExtensionState* state);
 // Copies the extension's name, in UTF-8. Returns the length needed, including
 // the NUL.
-WREN_API size_t Wren_CopyExtensionName(WrenBrowser* browser,
+WREN_API size_t Wren_CopyExtensionName(WrenProfile* profile,
                                        const char* extension_id,
                                        char* buffer,
                                        size_t size);
@@ -186,9 +201,9 @@ WREN_API size_t Wren_CopyExtensionName(WrenBrowser* browser,
 // greyed.
 //
 // Returns the PNG's size, and copies it only if `size` is large enough.
-// Returns 0 until the icon has loaded. WREN_CHANGE_EXTENSION_ACTIONS then
-// reports it.
-WREN_API size_t Wren_CopyExtensionIconPNG(WrenBrowser* browser,
+// Returns 0 until the icon has loaded. WREN_CHANGE_EXTENSIONS then reports
+// it.
+WREN_API size_t Wren_CopyExtensionIconPNG(WrenProfile* profile,
                                           const char* extension_id,
                                           int points,
                                           double scale,
@@ -196,9 +211,65 @@ WREN_API size_t Wren_CopyExtensionIconPNG(WrenBrowser* browser,
                                           size_t size);
 // Turns the extension on or off, as the switch on Chrome's extensions page
 // does. Returns WREN_ERROR_NOT_ALLOWED unless its state's can_change is true.
-WREN_API WrenResult Wren_SetExtensionEnabled(WrenBrowser* browser,
+WREN_API WrenResult Wren_SetExtensionEnabled(WrenProfile* profile,
                                              const char* extension_id,
                                              bool enabled);
+// Allows the extension in incognito or not, as Allow in Incognito on Chrome's
+// extensions page does. Chromium reloads an extension that is on, as there,
+// so its pages and its worker start again. Returns WREN_ERROR_NOT_ALLOWED
+// unless its state's can_allow_in_incognito is true.
+WREN_API WrenResult
+Wren_SetExtensionAllowedInIncognito(WrenProfile* profile,
+                                    const char* extension_id,
+                                    bool allowed);
+
+// --- Installing from the Chrome Web Store ----------------------------------
+//
+// For an app that brings the user over from another browser. The app reads
+// that browser's extensions itself, and asks the user which to install.
+
+typedef enum WrenWebStoreInstallResult {
+  WREN_WEB_STORE_INSTALLED = 0,
+  // The Profile already had it. Nothing changed.
+  WREN_WEB_STORE_ALREADY_INSTALLED = 1,
+  // The store has no extension with the ID.
+  WREN_WEB_STORE_NOT_FOUND = 2,
+  // Policy or Chrome's blocklist refuses it.
+  WREN_WEB_STORE_NOT_ALLOWED = 3,
+  // The download or the install failed. The store may be out of reach.
+  WREN_WEB_STORE_FAILED = 4,
+} WrenWebStoreInstallResult;
+
+// Receives the result of Wren_InstallFromWebStore. With WREN_OK, `results`
+// has one result for each ID, in order, valid during the call.
+typedef void (*WrenInstallFromWebStoreCallback)(
+    void* context,
+    WrenResult result,
+    const WrenWebStoreInstallResult* results,
+    size_t count);
+
+// Installs the Chrome Web Store extensions with `extension_ids`, as the user's
+// own installs, the way Chrome installs a user's synced extensions on a new
+// Mac. Ask the user first: Chromium shows no dialog. Each comes in on, with
+// the permissions it asks for. The user may turn it off or remove it.
+// WREN_CHANGE_EXTENSIONS reports each install. `callback` gets one result for
+// each ID, in order, once all are done, from the event loop. An ID given
+// twice gets the same result in both places. An off-the-record Profile
+// installs into its original. `callback` is not called if the app quits
+// first.
+//
+// `callback` gets one of these errors:
+//
+// - WREN_ERROR_INVALID_ARGUMENT for no Profile, NULL `extension_ids` with a
+//   count, or an ID that is not 32 letters from a to p. Nothing is installed.
+// - WREN_ERROR_CLOSED once the Profile has closed. If it closes before all
+//   are done, `callback` gets it too, and what was installed stays.
+// - WREN_ERROR_NOT_ALLOWED inside on_popover. Nothing is installed.
+WREN_API void Wren_InstallFromWebStore(WrenProfile* profile,
+                                       const char* const* extension_ids,
+                                       size_t count,
+                                       WrenInstallFromWebStoreCallback callback,
+                                       void* context);
 
 // --- App extensions ---------------------------------------------------------
 //
@@ -207,7 +278,8 @@ WREN_API WrenResult Wren_SetExtensionEnabled(WrenBrowser* browser,
 // here. The list and on_profile_extensions are in Wren.h.
 //
 // As each persistent or ephemeral Profile loads, Wren asks the app which of
-// them the Profile gets (on_profile_extensions). Then, in that Profile:
+// them the Profile gets, and how each starts there (on_profile_extensions,
+// with the request below). Then, in that Profile:
 //
 // - Wren installs each extension the Profile gets that it does not have, or
 //   has at a lower version. An update keeps the extension's data.
@@ -219,9 +291,9 @@ WREN_API WrenResult Wren_SetExtensionEnabled(WrenBrowser* browser,
 // Wren installs them as Chromium installs a .crx the user opens. They are
 // among the installed extensions above, with their actions. Wren does this in
 // the background once Chromium has loaded the Profile's extensions, and
-// WREN_CHANGE_EXTENSION_ACTIONS reports each change. Chromium logs a .crx it
-// refuses to install, such as one whose manifest it rejects, and Wren leaves
-// that extension out.
+// WREN_CHANGE_EXTENSIONS reports each change. Chromium logs a .crx it refuses
+// to install, such as one whose manifest it rejects, and Wren leaves that
+// extension out.
 //
 // Neither the user nor the extension can remove an app extension.
 // Chrome's extensions page greys out Remove, and
@@ -263,6 +335,109 @@ WREN_API WrenResult Wren_SetExtensionEnabled(WrenBrowser* browser,
 // So ship an internal extension only for code the app itself trusts.
 // WrenStartup.manifest_v2 says which Manifest V2 extensions run. A component
 // extension always does.
+
+// What one Profile gets of one of WrenStartup.extensions.
+typedef struct WrenProfileExtension {
+  // Whether the Profile gets the extension. Starts true.
+  bool gets;
+  // Whether it is on, and whether it is allowed in incognito, if Wren
+  // installs it in this Profile in this launch. They start as the
+  // extension's enabled_on_install and allowed_in_incognito_on_install. Once
+  // it is installed, the Profile keeps what the user or the app chose, and
+  // these do nothing, at an update too. An internal extension ignores them.
+  bool enabled;
+  bool allowed_in_incognito;
+} WrenProfileExtension;
+
+// on_profile_extensions' request (Wren.h).
+struct WrenProfileExtensionsRequest {
+  // The Profile's ID, as Wren_CopyProfileID gives it.
+  const char* profile_id;
+  // WREN_PROFILE_PERSISTENT or WREN_PROFILE_EPHEMERAL.
+  WrenProfileKind kind;
+  // One entry for each of WrenStartup.extensions, in its order.
+  WrenProfileExtension* extensions;
+  size_t count;
+};
+
+// --- Native messaging -------------------------------------------------------
+//
+// An extension written for Chrome talks to a program on the Mac through
+// chrome.runtime.connectNative and sendNativeMessage, which name a native
+// messaging host. In Chrome the host is a process Chromium starts from a
+// manifest on disk. A host in WrenStartup.native_hosts is the app instead: no
+// process starts, and the app hears the port from the event loop.
+//
+// - A name the app declares hides a host on disk with the same name. Any other
+//   name goes to the hosts on disk, as in Chromium. Chromium reads a user's
+//   hosts from the user data folder's NativeMessagingHosts, so hosts installed
+//   for Chrome are not found.
+// - The extension needs the nativeMessaging permission. An extension not in
+//   the host's extension_ids gets "Access to the specified native messaging
+//   host is forbidden.", and with no handler set every extension gets
+//   "Specified native messaging host not found.".
+// - The NativeMessagingBlocklist and NativeMessagingAllowlist policies apply
+//   to the app's hosts as to any. NativeMessagingUserLevelHosts does not.
+// - sendNativeMessage is a port too, which the first answer closes.
+// - A message from the extension may be up to 64 MiB. One from the app may be
+//   up to 1 MiB, as for any host.
+// - A message comes from an extension. Treat it as input, as a scheme's
+//   handler treats a URL.
+
+// One port an extension opened to one of the app's hosts. The pointer is
+// valid from WREN_NATIVE_PORT_OPENED until the WREN_NATIVE_PORT_CLOSED call
+// returns. The port is over once the app closes it or the extension does.
+// Using it then is safe: the calls below return WREN_ERROR_CLOSED, NULL or 0.
+// A port still open when the app quits ends with the event loop, with no
+// WREN_NATIVE_PORT_CLOSED.
+typedef struct WrenNativePort WrenNativePort;
+
+typedef enum WrenNativePortEvent {
+  // The extension called connectNative or sendNativeMessage.
+  WREN_NATIVE_PORT_OPENED = 0,
+  // `json` is the extension's message, as JSON text.
+  WREN_NATIVE_PORT_MESSAGE = 1,
+  // The port's last event, whichever side closed it.
+  WREN_NATIVE_PORT_CLOSED = 2,
+} WrenNativePortEvent;
+
+// Runs on the main thread, from the event loop, outside Chromium's
+// notifications, so it may call any function. `json` is NULL but for
+// WREN_NATIVE_PORT_MESSAGE, and valid during the call.
+typedef void (*WrenNativeHostHandler)(void* context,
+                                      WrenNativePort* port,
+                                      WrenNativePortEvent event,
+                                      const char* json);
+
+// Sets the handler of a host in WrenStartup.native_hosts, replacing any
+// handler set before. NULL removes the handler. A port opened without one
+// fails as a missing host does. Returns WREN_ERROR_INVALID_ARGUMENT for a
+// name that was not declared.
+WREN_API WrenResult Wren_SetNativeHostHandler(const char* name,
+                                              WrenNativeHostHandler handler,
+                                              void* context);
+
+// The extension's Profile, never an off-the-record one: an extension in an
+// off-the-record Profile reports its original. Borrowed. NULL once the port
+// is over.
+WREN_API WrenProfile* Wren_GetNativePortProfile(WrenNativePort* port);
+
+// Copies the extension's ID. Returns the size needed, including the NUL, and
+// copies what fits. Returns 0 once the port is over.
+WREN_API size_t Wren_CopyNativePortExtensionID(WrenNativePort* port,
+                                               char* buffer,
+                                               size_t size);
+
+// Sends the extension a message, the value of `json`. Returns
+// WREN_ERROR_INVALID_ARGUMENT for NULL, or for text that is not JSON or is
+// over 1 MiB. Returns WREN_ERROR_CLOSED once the port is over.
+WREN_API WrenResult Wren_SendNativePortMessage(WrenNativePort* port,
+                                               const char* json);
+
+// Closes the port. The extension sees "Native host has exited.", as when a
+// host's process ends, and WREN_NATIVE_PORT_CLOSED follows from the event
+// loop. Returns WREN_ERROR_CLOSED once the port is over.
+WREN_API WrenResult Wren_CloseNativePort(WrenNativePort* port);
 
 #ifdef __cplusplus
 }  // extern "C"
