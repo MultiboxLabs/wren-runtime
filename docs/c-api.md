@@ -68,10 +68,12 @@ static void OnReady(void* context) {
   Wren_OpenProfile(NULL, OnProfileOpened, NULL);
 }
 
+static void OnClosed(void* context, WrenResult result) {}
+
 // Required. This app shows one window, so it closes what Chromium opens.
 static void OnBrowserOpened(void* context, WrenBrowser* browser, WrenBrowserType type,
                             WrenBrowser* opener) {
-  Wren_CloseBrowser(browser);
+  Wren_CloseBrowsers(&browser, 1, OnClosed, NULL);
   Wren_ReleaseBrowser(browser);
 }
 

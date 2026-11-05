@@ -266,6 +266,25 @@ WREN_API WrenResult Wren_SetMainMenu(const WrenMenuItem* items, size_t count);
 WREN_API WrenResult Wren_UpdateMainMenuItem(const char* id,
                                             const WrenMenuItem* item);
 
+// --- The Dock menu ----------------------------------------------------------
+
+// Makes `items` the menu of the app's icon: the Dock's menu on macOS, above
+// the system's own items. It replaces the menu set last, and a count of 0
+// clears it, which is the default. Wren copies the items, and shows the change
+// the next time the menu opens.
+//
+// It takes APP items with an ID and a label, and SEPARATOR items, which a
+// taskbar's Jump List on Windows can also show. When the user chooses an
+// item, on_menu_command runs with its ID, which may be a main menu item's ID
+// to share its command. Wren does not activate the app: an item that shows a
+// window activates the app itself.
+//
+// Returns WREN_ERROR_INVALID_ARGUMENT, and the menu stays as it was, for a
+// SUBMENU, ROLE or CHROMIUM item, an APP item that is disabled, checked,
+// hidden or has a key, or an item that breaks a rule of WrenMenuItem. Returns
+// WREN_ERROR_NOT_ALLOWED inside on_popover or on_fullscreen.
+WREN_API WrenResult Wren_SetDockMenu(const WrenMenuItem* items, size_t count);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

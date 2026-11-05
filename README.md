@@ -6,21 +6,21 @@ This repository holds Wren's releases, for app developers. Wren's source is not 
 
 ## Get Wren
 
-Install the `wren` command once, into a folder on your `PATH`. The GitHub CLI must be signed in to an account with access to this repository.
+Install the `wren` command once:
 
 ```sh
-gh release download --repo MultiboxLabs/wren-runtime --pattern wren \
-  --output ~/.local/bin/wren
-chmod +x ~/.local/bin/wren
+curl -fsSL https://wrenbrowser.com/runtime/cli/install.sh | sh
 ```
 
-Then, in a project whose `wren-app.json` names a release, such as `"wren": "0.3.0"`, run `wren install`. It fetches that release, checks it against its `SHA256SUMS`, and keeps it on the Mac. It links the release into the project as `.wren/runtime`, which the project's build files point at.
+`install.sh`, here, puts the newest release's `wren` in `~/.local/bin`, checked against the release's `SHA256SUMS`, and says if that folder is not on your `PATH`. `WREN_VERSION` and `WREN_INSTALL_DIR` pick another release or folder.
+
+Then, in a project whose `wren-app.json` names a release, such as `"wren": "0.4.0"`, run `wren install`. It fetches that release, checks it against its `SHA256SUMS`, and keeps it on the Mac. It links the release into the project as `.wren/runtime`, which the project's build files point at.
 
 Each release on this repository's Releases page holds four files:
 
 - `wren-runtime-<version>-mac-arm64.zip`, the release
-- a zip of its debug symbols, for crash reports
-- `SHA256SUMS`
+- `wren-runtime-<version>-mac-arm64-source.zip`, the source of the Chromium files Wren changes that are under the LGPL or the MPL
+- `SHA256SUMS`, of the zips and `wren`
 - `wren`, the command
 
 The release is a folder that holds everything an app needs:
@@ -35,7 +35,7 @@ The release is a folder that holds everything an app needs:
 | `bin/wren`                 | The `wren` command                        |
 | `docs`                     | These guides                              |
 
-Fetch the files with `wren install` or `gh`, as Getting started says, not in a web browser. macOS quarantines what a web browser downloads, and then refuses to run `bin/wren`.
+Fetch the files with `install.sh`, `wren install`, `curl` or `gh`, as Getting started says, not in a web browser. macOS quarantines what a web browser downloads, and then refuses to run `bin/wren`.
 
 ## Start here
 
@@ -46,4 +46,12 @@ Fetch the files with `wren install` or `gh`, as Getting started says, not in a w
 
 ## Licence
 
-Wren may be used only with the written permission of Multibox Labs. See `LICENSE` here, which a release carries as `LICENSES/Wren.txt`. A release's `LICENSES` folder also holds Chromium's notices, which go with every app that ships the framework.
+Wren is proprietary software of Avocado and Bear Limited, which trades as Multibox Labs. `LICENSE` here is its licence, and a release carries it as `LICENSES/Wren.txt`. In short:
+
+- You may download Wren and use it to develop and test your own apps, inside your organisation.
+- You may use it to build, run, change and contribute to [Wren Browser](https://github.com/MultiboxLabs/wren-browser), but not distribute builds of it.
+- Shipping an app with Wren to anyone outside your organisation needs a written licence from Multibox Labs for that app. Ask for one at licensing@wrenbrowser.com.
+
+A release's `LICENSES` folder also holds Chromium's notices, and `Source.txt`, which says where the source of the files Wren changes is. Both go with every app that ships the framework.
+
+Report bugs and ask for features in this repository's issues. Report a security vulnerability privately, as `SECURITY.md` says.

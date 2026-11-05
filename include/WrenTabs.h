@@ -112,6 +112,103 @@ typedef enum WrenTabAlert {
   WREN_TAB_ALERT_AUDIBLE = 1u << 10,
 } WrenTabAlert;
 
+// How a tab was opened from another (WrenTabState.opened_as).
+typedef enum WrenTabOpenedAs {
+  // No tab opened it: the app, an extension or a restore made it.
+  WREN_TAB_OPENED_AS_NONE = 0,
+  // A tab in front, as a link with target=_blank opens.
+  WREN_TAB_OPENED_AS_FOREGROUND_TAB = 1,
+  // A tab behind, as a Cmd-click, a middle click or Open Link in New Tab
+  // opens.
+  WREN_TAB_OPENED_AS_BACKGROUND_TAB = 2,
+  // A new window, as a Shift-click or Open Link in New Window opens.
+  WREN_TAB_OPENED_AS_WINDOW = 3,
+  // A popup, as window.open with a size or "popup" opens.
+  WREN_TAB_OPENED_AS_POPUP = 4,
+} WrenTabOpenedAs;
+
+// One on_navigation request. Unique for the life of the process, and never
+// reused. WREN_NO_NAVIGATION means none.
+typedef uint64_t WrenNavigationID;
+#define WREN_NO_NAVIGATION 0
+
+// Whether a tab's media plays (WrenTabMedia.playback).
+typedef enum WrenMediaPlayback {
+  // Nothing the person can play or pause: no media, only short sounds, media
+  // that has stopped, or a call's stream. WrenTabMedia.actions may still
+  // name what the page offers, such as a call's, and the devices may be set.
+  WREN_MEDIA_NONE = 0,
+
+  WREN_MEDIA_PLAYING = 1,
+  WREN_MEDIA_PAUSED = 2,
+} WrenMediaPlayback;
+
+// What the page lets a person do with its media now, whatever its playback:
+// an action named here can be asked for. Bits of WrenTabMedia.actions, and
+// the action Wren_ControlTabMedia takes. Play,
+// pause, stop and the seeks come with any media that can be played; the
+// tracks, skip ad and a call's three only when the page handles them
+// (navigator.mediaSession.setActionHandler); Picture in Picture when the
+// page has one video, or handles it.
+typedef enum WrenMediaAction {
+  WREN_MEDIA_ACTION_PLAY = 1u << 0,
+  WREN_MEDIA_ACTION_PAUSE = 1u << 1,
+  // Ends the media, as Chrome's media controls' close button does.
+  WREN_MEDIA_ACTION_STOP = 1u << 2,
+
+  WREN_MEDIA_ACTION_PREVIOUS_TRACK = 1u << 3,
+  WREN_MEDIA_ACTION_NEXT_TRACK = 1u << 4,
+  // 5 seconds back or forward.
+  WREN_MEDIA_ACTION_SEEK_BACKWARD = 1u << 5,
+  WREN_MEDIA_ACTION_SEEK_FORWARD = 1u << 6,
+  // Seeking to a position is offered (Wren_SeekTabMedia). Not an action
+  // for Wren_ControlTabMedia.
+  WREN_MEDIA_ACTION_SEEK_TO = 1u << 7,
+
+  WREN_MEDIA_ACTION_SKIP_AD = 1u << 8,
+  WREN_MEDIA_ACTION_ENTER_PICTURE_IN_PICTURE = 1u << 9,
+  WREN_MEDIA_ACTION_EXIT_PICTURE_IN_PICTURE = 1u << 10,
+  // A call's microphone and camera, on or off, and ending the call.
+  WREN_MEDIA_ACTION_TOGGLE_MICROPHONE = 1u << 11,
+  WREN_MEDIA_ACTION_TOGGLE_CAMERA = 1u << 12,
+  WREN_MEDIA_ACTION_HANG_UP = 1u << 13,
+} WrenMediaAction;
+
+// A call's microphone or camera, as its page says
+// (navigator.mediaSession.setMicrophoneActive and setCameraActive).
+typedef enum WrenMediaDevice {
+  // The page has not said.
+  WREN_MEDIA_DEVICE_UNKNOWN = 0,
+
+  WREN_MEDIA_DEVICE_ON = 1,
+  WREN_MEDIA_DEVICE_OFF = 2,
+} WrenMediaDevice;
+
+// A tab's media (WrenTabState.media). WREN_TAB_FIELD_MEDIA reports a change.
+typedef struct WrenTabMedia {
+  WrenMediaPlayback playback;
+  // WrenMediaAction bits.
+  uint32_t actions;
+  // True if Chromium knows the media's position. The rest of the position
+  // is 0 without it.
+  bool has_position;
+  // Where the media is at the read, in milliseconds. Chromium reports a
+  // change only when the position jumps or the rate changes, not as the
+  // media plays: between reports, the position moves by `rate` times the
+  // time since the read.
+  int64_t position_ms;
+  // The media's length in milliseconds, 0 for a stream with no end
+  // (`live`).
+  int64_t duration_ms;
+  // 1 at normal speed, 0 while paused.
+  double rate;
+  // True for a stream with no end. Seeking is not offered.
+  bool live;
+
+  WrenMediaDevice microphone;
+  WrenMediaDevice camera;
+} WrenTabMedia;
+
 typedef struct WrenTabState {
   bool loading;
   bool can_go_back;
@@ -142,12 +239,15 @@ typedef struct WrenTabState {
   // leaves the element, or is replaced by a discard, until the new page is in
   // an element.
   bool in_element;
-  // When the tab was last on screen, in milliseconds since 1970, UTC: the
-  // current time while it is shown, and the time it was hidden once it is
-  // not. A tab in a minimised window, on another Space or covered by other
-  // windows is hidden. A restored tab keeps its time from the launch before
-  // until it is shown. A tab added in the background has the time it was
-  // made. No change is reported: read it when deciding.
+  // When the tab was last in use, in milliseconds since 1970, UTC. While the
+  // tab is shown, or is its Browser's active tab, it is the current time.
+  // Otherwise it is when the tab was hidden or stopped being active,
+  // whichever came later. So the active tab of a Browser whose window is
+  // minimised, covered or on another Space, or that is in the background
+  // (Wren_SetBrowserBackgrounded), reads the current time, as Chrome never
+  // takes the active tab for idle. A restored tab keeps its time from the
+  // launch before until it is shown. A tab added in the background has the
+  // time it was made. No change is reported: read it when deciding.
   int64_t last_active_ms;
   // WrenTabAlert bits. WREN_TAB_FIELD_ALERTS reports a change.
   uint32_t alerts;
@@ -163,6 +263,40 @@ typedef struct WrenTabState {
   // True while the tab is kept out of the session (Wren_SetTabSessionExcluded).
   // WREN_TAB_FIELD_SESSION_EXCLUDED reports a change.
   bool session_excluded;
+  // True while the page waits to load until it is shown: a tab a restore
+  // left in the background, a discarded tab, or a background tab whose
+  // frame crashed. Showing, reloading or capturing the tab loads it. After a
+  // restore, Chromium also loads background tabs itself, as Chrome does: at
+  // least 4, and up to 20 while memory allows, of those used in the last 30
+  // days. A change comes with WREN_TAB_FIELD_LOADING or
+  // WREN_TAB_FIELD_DISCARDED, except a background tab's crashed frame, which
+  // Chromium does not report.
+  bool unloaded;
+  // True while the app has set the tab to ignore input
+  // (Wren_SetTabIgnoresInput). A block of Chromium's own, such as DevTools',
+  // does not show here. WREN_TAB_FIELD_IGNORES_INPUT reports a change.
+  bool ignores_input;
+  // The tab whose page opened this one, or WREN_NO_TAB: by a link, a script,
+  // a click with a key held or the page's context menu. It names the opener
+  // even when a noopener link hides it from the page, and after the opener
+  // closes. Open Link in Incognito Window names a tab of the original
+  // Profile. It is set by the time on_changed or on_browser_opened first
+  // gives the tab, never changes, and stays when the tab moves to another
+  // Browser or its page is discarded. The session does not keep it.
+  WrenTabID opened_by;
+  // How opened_by opened it; WREN_TAB_OPENED_AS_NONE without opened_by.
+  WrenTabOpenedAs opened_as;
+  // True while the app has set the tab to watch its navigations
+  // (Wren_SetTabWatchesNavigations). WREN_TAB_FIELD_WATCHES_NAVIGATIONS
+  // reports a change.
+  bool watches_navigations;
+  // The on_navigation request whose WREN_NAVIGATION_OPEN_IN_NEW_TAB opened
+  // this tab, or WREN_NO_NAVIGATION. Set, with opened_by, by the time
+  // on_changed or on_browser_opened first gives the tab, and kept as
+  // opened_by is.
+  WrenNavigationID opened_for_navigation;
+  // What the tab's media is doing. See "A tab's media".
+  WrenTabMedia media;
 } WrenTabState;
 
 WREN_API WrenResult Wren_GetTabState(WrenTabID tab, WrenTabState* state);
@@ -234,10 +368,13 @@ typedef void (*WrenTabImageCallback)(void* context,
 // The tab may be shown or in the background, in any Browser, off the record
 // too. A background page draws for the picture but stays hidden: it is not
 // told it is shown, and no visibilitychange fires. A tab still loading gives
-// what is drawn so far. A tab that has never drawn, such as one a restore left
-// in the background, starts loading, and may give WREN_ERROR_NO_IMAGE: ask
-// again once it has loaded. The picture is the page alone: no docked DevTools,
-// no app UI and none of Chromium's windows over it.
+// what is drawn so far. An unloaded tab (WrenTabState.unloaded), such as one a
+// restore left in the background, starts loading, as Chrome's tab previews
+// do, and may give WREN_ERROR_NO_IMAGE: ask again once it has loaded. To leave
+// a tab unloaded, read its state first and do not capture it. Chromium loads
+// some restored tabs itself (WrenTabState.unloaded). The picture is
+// the page alone: no docked DevTools, no app UI and none of Chromium's windows
+// over it.
 //
 // `callback` gets one of these errors without a picture:
 //
@@ -264,6 +401,136 @@ WREN_API WrenResult Wren_SetTabPinned(WrenTabID tab, bool pinned);
 // unmutes a tab its site's sound setting muted, too. Chromium does not keep
 // it in the session.
 WREN_API WrenResult Wren_SetTabMuted(WrenTabID tab, bool muted);
+
+// Makes the tab's page ignore input, or take it again. While it ignores,
+// Chromium drops the mouse, the wheel, keys, drags and accessibility actions
+// meant for the page, as under one of its own tab-modal dialogs. A screen
+// reader can still read the page. The setting stays with the tab when it
+// moves to another Browser, and when its page is replaced, as a discard
+// does. The session does not keep it. WREN_TAB_FIELD_IGNORES_INPUT reports
+// a change.
+//
+// The page can still take the keyboard and an input method's text. Keep the
+// keyboard off the tab while it ignores: Wren_FocusTab refuses it, but the
+// Tab key from a view beside it and AppKit's key view loop can still give it
+// the keyboard.
+//
+// A block of Chromium's own, such as DevTools', is separate: lifting the
+// app's leaves it.
+//
+// - WREN_ERROR_TAB_UNAVAILABLE if no open tab has the ID.
+// - WREN_ERROR_NOT_ALLOWED inside on_popover.
+WREN_API WrenResult Wren_SetTabIgnoresInput(WrenTabID tab, bool ignores);
+
+// --- A tab's media ----------------------------------------------------------
+//
+// What a tab plays, from Chromium's media session for the tab, as Chrome's
+// media controls in its toolbar show it: WrenTabState.media, these copies,
+// and calls that act on it. The app draws the controls. macOS's Now Playing,
+// the keyboard's media keys and the Picture in Picture window's buttons stay
+// Chromium's, and act on the same media, so every change reaches the app as
+// a WREN_TAB_FIELD_MEDIA or WREN_TAB_FIELD_MEDIA_METADATA record.
+
+// Which text Wren_CopyTabMediaText copies.
+typedef enum WrenMediaText {
+  // The page's title for its media, else the page's own title.
+  WREN_MEDIA_TEXT_TITLE = 0,
+  // "" unless the page sets them.
+  WREN_MEDIA_TEXT_ARTIST = 1,
+  WREN_MEDIA_TEXT_ALBUM = 2,
+  // Where the media comes from, as Chrome's media controls show it: the
+  // site, such as "example.com", or an app's or extension's name.
+  WREN_MEDIA_TEXT_SOURCE = 3,
+} WrenMediaText;
+
+// Copies one text of the tab's media, or "" if it has none. Returns the
+// length needed, including the NUL.
+WREN_API size_t Wren_CopyTabMediaText(WrenTabID tab,
+                                      WrenMediaText which,
+                                      char* buffer,
+                                      size_t size);
+
+// Copies the artwork the page gives its media as a PNG into `buffer` if it
+// fits, and returns the PNG's size in bytes. Returns 0 if the page gives
+// none, or while Wren is still fetching it: WREN_TAB_FIELD_MEDIA_METADATA
+// reports it when it arrives. It is the image Chrome's media controls pick,
+// at least 114 pixels and as near 512 as the page has.
+WREN_API size_t Wren_CopyTabMediaArtworkPNG(WrenTabID tab,
+                                            uint8_t* buffer,
+                                            size_t size);
+
+// Asks the tab's media to do one action of WrenTabMedia.actions, as Chrome's
+// media controls do. The call sends it to the page and returns: the result
+// comes as a WREN_TAB_FIELD_MEDIA record, or as the page's own change. It
+// may be made anywhere, inside any callback.
+//
+// - WREN_ERROR_TAB_UNAVAILABLE if no open tab has the ID.
+// - WREN_ERROR_INVALID_ARGUMENT for none or more than one bit, or for
+//   WREN_MEDIA_ACTION_SEEK_TO, which is Wren_SeekTabMedia.
+// - WREN_ERROR_NOT_ALLOWED if the tab's media does not offer the action now.
+WREN_API WrenResult Wren_ControlTabMedia(WrenTabID tab, WrenMediaAction action);
+
+// Seeks the tab's media to `position_ms` from its start, as
+// Wren_ControlTabMedia acts. A position past the end goes to the end.
+//
+// - WREN_ERROR_TAB_UNAVAILABLE if no open tab has the ID.
+// - WREN_ERROR_INVALID_ARGUMENT for a negative position.
+// - WREN_ERROR_NOT_ALLOWED unless the media offers WREN_MEDIA_ACTION_SEEK_TO.
+WREN_API WrenResult Wren_SeekTabMedia(WrenTabID tab, int64_t position_ms);
+
+// --- Navigations
+// --------------------------------------------------------------
+
+// A navigation of a watched tab, as on_navigation gets it (Wren.h). Strings
+// are UTF-8, valid only during the call.
+struct WrenNavigationRequest {
+  // Unique for the life of the process. A tab opened for the request reads it
+  // in WrenTabState.opened_for_navigation.
+  WrenNavigationID id;
+  WrenTabID tab;
+  // Where the tab would go: at a redirect, the redirect's target.
+  const char* url;
+  // The origin of the page that started the navigation, "null" for an opaque
+  // one, such as a sandboxed frame's, or NULL when no page started it.
+  const char* initiator_origin;
+  // A server redirected the navigation. It was asked about when it started.
+  bool redirect;
+  // A click, a key or another user action started it.
+  bool user_gesture;
+  // A page or an extension started it: a link, a form, a page's script, or
+  // an extension's chrome.tabs.update, with initiator_origin naming it. False
+  // for the browser's own commands, such as Chrome's Home.
+  bool by_page;
+  // The request is a POST, such as a form's. A new tab the answer opens sends
+  // the same body and Content-Type, once.
+  bool post;
+};
+
+// Makes the tab ask the app about its navigations, through on_navigation, or
+// stop asking. Off by default.
+//
+// Asked: each navigation of the tab's page to another document, when it
+// starts and at each redirect, whether a page or Chromium started it.
+//
+// Not asked:
+//
+// - navigations the app starts with a Wren call, such as Wren_Navigate,
+//   Wren_OpenSuggestion and Wren_OpenBookmarkItem
+// - a reload, going back or forward, or a discarded or restored page loading
+//   again
+// - a frame inside the page, a fragment or history.pushState, and about:blank
+//
+// A watched tab does not prerender pages: a page the tab would show at once
+// from a prerender is asked about as any other. Watching stops the tab's
+// prerenders.
+//
+// The setting stays with the tab when it moves to another Browser, and when
+// its page is replaced, as a discard does. The session does not keep it.
+// WREN_TAB_FIELD_WATCHES_NAVIGATIONS reports a change.
+//
+// - WREN_ERROR_TAB_UNAVAILABLE if no open tab has the ID.
+// - WREN_ERROR_NOT_ALLOWED inside on_popover or on_navigation.
+WREN_API WrenResult Wren_SetTabWatchesNavigations(WrenTabID tab, bool watches);
 
 // Keeps the tab out of the session, or puts it back. Use it for a tab the app
 // makes again from its own records each launch, which the session would
@@ -401,6 +668,14 @@ WREN_API WrenResult Wren_GoForward(WrenTabID tab);
 // Reloads the page. Chromium may ask the user before sending a form again.
 WREN_API WrenResult Wren_Reload(WrenTabID tab);
 WREN_API WrenResult Wren_Stop(WrenTabID tab);
+// Ends the renderer process of the tab's page, as Chrome's task manager's End
+// Process does. The page's state reads WREN_TAB_CRASH_KILLED, and
+// Wren_Reload loads it again. Every other page and frame in that process,
+// other tabs' and web views' included, ends with it, each reading killed too,
+// as in Chrome. Returns WREN_ERROR_NOT_ALLOWED for a tab whose page has no
+// live renderer (not loaded, discarded, crashed, or still starting one), and
+// inside on_popover or on_fullscreen.
+WREN_API WrenResult Wren_KillTabRenderer(WrenTabID tab);
 
 // --- Tab groups -------------------------------------------------------------
 
@@ -494,7 +769,8 @@ WREN_API void* Wren_GetTabView(WrenTabID tab);
 // A page that wants the address field to have focus instead, such as the New
 // Tab page, gets on_focus_location_bar. The call does not make the window key.
 // It does nothing while the view is in no window. A tab that a web view's page
-// shows (WrenWebView.h) takes focus there, in that web view's window.
+// shows (WrenWebView.h) takes focus there, in that web view's window. A tab
+// that ignores input (Wren_SetTabIgnoresInput) gets WREN_ERROR_NOT_ALLOWED.
 WREN_API WrenResult Wren_FocusTab(WrenTabID tab);
 
 // --- Split tabs -------------------------------------------------------------

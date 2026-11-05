@@ -50,7 +50,7 @@ typedef struct WrenExtensionActionState {
   // action opens its context menu.
   bool enabled;
   // True if the action is shown in the toolbar. This is the Profile's
-  // setting, as in Chrome.
+  // setting (Wren_SetExtensionPinned), as in Chrome.
   bool pinned;
   // True if policy pinned the action. The user cannot unpin it.
   bool force_pinned;
@@ -124,19 +124,6 @@ WREN_API WrenResult Wren_ClickExtensionAction(WrenBrowser* browser,
 // returns.
 WREN_API WrenResult Wren_ShowExtensionActionMenu(WrenBrowser* browser,
                                                  const char* extension_id);
-// Pins or unpins the action for the Profile, as Chrome's menu does. Returns
-// WREN_ERROR_NOT_ALLOWED in an off-the-record Browser, and for a pin set by
-// policy.
-WREN_API WrenResult Wren_SetExtensionActionPinned(WrenBrowser* browser,
-                                                  const char* extension_id,
-                                                  bool pinned);
-// Moves a pinned action to `index` among the pinned actions. Returns
-// WREN_ERROR_NOT_ALLOWED for an action that is not pinned. As with pinning,
-// it also returns WREN_ERROR_NOT_ALLOWED in an off-the-record Browser and for
-// a pin set by policy.
-WREN_API WrenResult Wren_MoveExtensionAction(WrenBrowser* browser,
-                                             const char* extension_id,
-                                             size_t index);
 // Opens Chromium's extensions menu below the "extensions" anchor, or closes it
 // if it is open. The menu lists every action, with pinning and site access.
 // Wren asks on_popover before opening it, as WREN_POPOVER_EXTENSIONS_MENU.
@@ -184,6 +171,10 @@ typedef struct WrenExtensionState {
   // off the record. Policy that keeps the user from turning the extension
   // off does not lock this switch.
   bool can_allow_in_incognito;
+  // True if the extension may show its requests for access to a site in the
+  // toolbar, as Chrome's extensions page and menu set it. It is on until the
+  // user turns it off.
+  bool shows_requests;
 } WrenExtensionState;
 
 WREN_API WrenResult Wren_GetExtensionState(WrenProfile* profile,
@@ -222,6 +213,43 @@ WREN_API WrenResult
 Wren_SetExtensionAllowedInIncognito(WrenProfile* profile,
                                     const char* extension_id,
                                     bool allowed);
+// Sets whether the extension may show its requests for access in the
+// toolbar, whether the extension is on or off. Returns WREN_ERROR_NOT_ALLOWED
+// for an off-the-record Profile, which cannot change it, as with pins.
+WREN_API WrenResult Wren_SetExtensionShowsRequests(WrenProfile* profile,
+                                                   const char* extension_id,
+                                                   bool show);
+
+// The pinned extensions are those whose actions Chrome shows in its toolbar,
+// in that order. They are the Profile's, for every window of it, and an
+// off-the-record Profile shows its original's. An extension that is turned
+// off is not listed, and keeps its place for when it is turned on.
+//
+// Pinning and moving return WREN_ERROR_NOT_ALLOWED for an off-the-record
+// Profile, which cannot change them, as in Chrome, for a pin set by policy,
+// and for an extension that is turned off, which has no action. Chromium
+// gives an extension its action just after it loads, and reports
+// WREN_CHANGE_EXTENSIONS then; until that, pinning it is not allowed.
+
+// The number of pinned extensions.
+WREN_API size_t Wren_GetPinnedExtensionCount(WrenProfile* profile);
+// Copies the extension ID at `index` among the pinned extensions, or "" if
+// there is none. The ID is UTF-8. Returns the length needed, including the
+// NUL.
+WREN_API size_t Wren_CopyPinnedExtensionID(WrenProfile* profile,
+                                           size_t index,
+                                           char* buffer,
+                                           size_t size);
+// Pins or unpins the extension, as Chrome's menu does. A pin goes last.
+WREN_API WrenResult Wren_SetExtensionPinned(WrenProfile* profile,
+                                            const char* extension_id,
+                                            bool pinned);
+// Moves a pinned extension to `index` among the pinned ones, or last for an
+// index past the end. Returns WREN_ERROR_NOT_ALLOWED for one that is not
+// pinned.
+WREN_API WrenResult Wren_MoveExtension(WrenProfile* profile,
+                                       const char* extension_id,
+                                       size_t index);
 
 // --- Installing from the Chrome Web Store ----------------------------------
 //
@@ -338,6 +366,9 @@ WREN_API void Wren_InstallFromWebStore(WrenProfile* profile,
 
 // What one Profile gets of one of WrenStartup.extensions.
 typedef struct WrenProfileExtension {
+  // The extension's ID, 32 letters from a to p, as `wren extension-id`
+  // prints it. Valid only during the call. Wren ignores a change to it.
+  const char* id;
   // Whether the Profile gets the extension. Starts true.
   bool gets;
   // Whether it is on, and whether it is allowed in incognito, if Wren

@@ -7,13 +7,13 @@ This page makes a first Wren app. It is one window that shows a web page in a re
 - A Mac with Apple silicon.
 - Xcode or the Command Line Tools, for `swift build` and `codesign`.
 - For Rust, also Rust 1.85 or later, from rustup or Homebrew.
-- The `wren` command, installed once. Releases are published in the private repository `MultiboxLabs/wren-runtime`. So you need access to it, and the GitHub CLI `gh`, signed in. Put `wren` in a folder on your `PATH`, such as `~/.local/bin`:
+- The `wren` command, installed once. Releases are published in the public repository `MultiboxLabs/wren-runtime`, whose install script puts `wren` in `~/.local/bin`:
 
   ```sh
-  gh release download --repo MultiboxLabs/wren-runtime --pattern wren \
-    --output ~/.local/bin/wren
-  chmod +x ~/.local/bin/wren
+  curl -fsSL https://wrenbrowser.com/runtime/cli/install.sh | sh
   ```
+
+  It checks `wren` against the release's `SHA256SUMS`, and says if `~/.local/bin` is not on your `PATH`.
 
 A project names the Wren release it is built with. `wren install` fetches that release, once per Mac, and links it into the project as `.wren/runtime`. The project's build files point there. So they are the same on every Mac, and the app is built and bundled with the same release.
 
@@ -159,7 +159,7 @@ The names this program uses, in Swift, in Rust and in C:
 | `tab.focus()` | `BrowserTab::focus` | `Wren_FocusTab` |
 | `AppDelegate.changed` | `App::changed` | `on_changed` |
 | `AppDelegate.browserClosed` | `App::browser_closed` | `on_browser_closed` |
-| `browser.close()` | `Browser::close` | `Wren_CloseBrowser` |
+| `browser.close` | `Browser::close` | `Wren_CloseBrowsers` |
 | `WrenApp.quit` | `MainThread::quit` | `Wren_Quit` |
 
 The C headers in `include` describe each one fully. Each Swift and Rust item's comment names its C side.
@@ -173,7 +173,7 @@ The C headers in `include` describe each one fully. Each Swift and Rust item's c
   "name": "MyBrowser",
   "displayName": "My Browser",
   "bundleId": "com.example.mybrowser",
-  "wren": "0.3.0"
+  "wren": "0.4.0"
 }
 ```
 
@@ -187,7 +187,7 @@ wren bundle --incremental --executable .build/release/MyBrowser \
 open MyBrowser.app
 ```
 
-`wren install` puts release 0.3.0 on this Mac, fetching it only the first time, and links `.wren/runtime` to it. The `.wren` folder keeps itself out of git. Run `wren install` again after changing `"wren"`.
+`wren install` puts release 0.4.0 on this Mac, fetching it only the first time, and links `.wren/runtime` to it. The `.wren` folder keeps itself out of git. Run `wren install` again after changing `"wren"`.
 
 `swift build` makes only an executable, and that executable does not start on its own. It loads the framework from the app bundle it is in. `wren bundle` makes the bundle. The bundle has the framework, Chromium's helper apps under your app's name, and an ad hoc signature that this Mac accepts. Run `wren bundle` again after every build. With `--incremental`, it keeps the bundle when only the executable changed and signs only the app, in under half a second. The app also starts sooner, because macOS scans a bundle only the first time it starts. See [While you develop](wren-cli.md#while-you-develop).
 
@@ -371,19 +371,19 @@ The crate links the framework beside it, through `.wren/runtime`. To use another
 
 ## A release downloaded by hand
 
-You can also fetch a release with `gh`, check it, unpack it where you keep it, and link it into the project as `wren install` would:
+You can also fetch a release with `curl`, check it, unpack it where you keep it, and link it into the project as `wren install` would:
 
 ```sh
-gh release download v0.3.0 --repo MultiboxLabs/wren-runtime \
-  --pattern wren-runtime-0.3.0-mac-arm64.zip --pattern SHA256SUMS
+curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.4.0/wren-runtime-0.4.0-mac-arm64.zip
+curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.4.0/SHA256SUMS
 shasum -a 256 --ignore-missing -c SHA256SUMS
-ditto -x -k wren-runtime-0.3.0-mac-arm64.zip ~/wren-runtimes
+ditto -x -k wren-runtime-0.4.0-mac-arm64.zip ~/wren-runtimes
 # In the project's folder:
-mkdir -p .wren && ln -s ~/wren-runtimes/wren-runtime-0.3.0-mac-arm64 .wren/runtime
+mkdir -p .wren && ln -s ~/wren-runtimes/wren-runtime-0.4.0-mac-arm64 .wren/runtime
 echo '*' > .wren/.gitignore
 ```
 
-Use `gh` rather than a web browser. macOS marks what a web browser downloads as quarantined, and then refuses to run `bin/wren` from it.
+Use `curl` or `gh` rather than a web browser. macOS marks what a web browser downloads as quarantined, and then refuses to run `bin/wren` from it.
 
 ## Tell your coding agent
 

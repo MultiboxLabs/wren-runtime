@@ -100,7 +100,8 @@ WREN_API WrenResult Wren_RenameProfile(WrenProfile* profile, const char* name);
 // - WREN_ERROR_INVALID_ARGUMENT for an off-the-record or ephemeral Profile.
 // - WREN_ERROR_CLOSED once the Profile has closed.
 // - WREN_ERROR_NOT_ALLOWED for the last persistent Profile, which Chrome
-//   would replace with a new one, or one being deleted already.
+//   would replace with a new one, one being deleted already, one with a
+//   Browser in a Wren_CloseBrowsers request, or while a quit is under way.
 WREN_API void Wren_DeleteProfile(WrenProfile* profile,
                                  WrenResultCallback callback,
                                  void* context);
@@ -405,17 +406,69 @@ WREN_API void Wren_CreateBrowser(WrenProfile* profile,
                                  WrenBrowserCallback callback,
                                  void* context);
 
+// Creates a popup Browser on `profile` with one tab showing `url`, as
+// Chromium makes a page's popup: WREN_BROWSER_POPUP, with a title bar and a
+// location bar (Wren_GetWindowFeatures), kept in the session and restored as
+// a popup. The page has no opener. `x`, `y`, `width` and `height` are the
+// frame Wren_GetRequestedBounds then gives, in its coordinates: `x` and `y`
+// NAN for no position, and `width` and `height` 0 for Chromium's own size.
+// The callback gives the Browser, as Wren_CreateBrowser's does, and
+// on_browser_opened does not run for it.
+//
+// A link the page opens in a new tab, and Chromium's New Tab command in the
+// popup, open in a normal Browser of the Profile, as Chrome's do; that
+// Browser reaches on_browser_opened if Chromium makes it.
+// Wren_MovePopupTabToBrowser and Wren_MovePopupTabToNewBrowser move its tab
+// to a normal Browser.
+//
+// The callback gets WREN_ERROR_INVALID_ARGUMENT for a NULL, empty or invalid
+// `url`, or a size below 0 or not a number, and otherwise
+// Wren_CreateBrowser's errors.
+WREN_API void Wren_CreatePopupBrowser(WrenProfile* profile,
+                                      const char* url,
+                                      double x,
+                                      double y,
+                                      double width,
+                                      double height,
+                                      WrenBrowserCallback callback,
+                                      void* context);
+
 WREN_API void Wren_RetainBrowser(WrenBrowser* browser);
 WREN_API void Wren_ReleaseBrowser(WrenBrowser* browser);
 
-// Asks the Browser to close. Its pages may cancel the close with
-// beforeunload. on_browser_closed reports the close. Returns WREN_ERROR_CLOSED
-// if the Browser has already closed.
+// Closes `count` Browsers, all or none, as quitting closes them. `callback`
+// gets the answer, from the event loop.
+//
+// First each page's beforeunload may ask, one Browser at a time. Then, if
+// the close would leave an off-the-record Profile with no Browser while it
+// has downloads in progress, Chromium asks whether to cancel them, through
+// on_downloads_prompt with WREN_DOWNLOADS_PROMPT_CLOSE. Only once every page
+// and that question have agreed do the Browsers close.
+//
+// - WREN_OK comes after on_browser_closed has run for each one.
+// - WREN_ERROR_CANCELLED means a page or the downloads question kept them.
+//   Every Browser stays open, none closed by the request, and each page asks
+//   again next time. Keeping the downloads shows chrome://downloads in that
+//   Profile's Browser, as Chrome does.
+//
+// A Browser that closes by itself meanwhile, because its last tab closed,
+// counts as closed. A quit that starts while the request asks takes it over:
+// `callback` gets WREN_ERROR_CANCELLED, and the quit asks the same pages.
+//
+// `callback` gets one of these errors without anything being done:
+//
+// - WREN_ERROR_INVALID_ARGUMENT for no Browsers, or a NULL one.
+// - WREN_ERROR_CLOSED if one has closed already.
+// - WREN_ERROR_NOT_ALLOWED if one is in a request already or its Profile is
+//   being deleted, while a quit is under way, or inside on_popover.
 //
 // Chromium also closes a Browser when its last tab closes, as Chrome closes
 // the window. on_browser_closed reports that close too. Wren has no way to
 // keep a Browser open with no tabs.
-WREN_API WrenResult Wren_CloseBrowser(WrenBrowser* browser);
+WREN_API void Wren_CloseBrowsers(WrenBrowser* const* browsers,
+                                 size_t count,
+                                 WrenResultCallback callback,
+                                 void* context);
 
 WREN_API bool Wren_IsBrowserOpen(WrenBrowser* browser);
 // Returns WREN_NO_BROWSER once the Browser has closed.

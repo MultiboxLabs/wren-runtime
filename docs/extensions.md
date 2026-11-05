@@ -65,6 +65,19 @@ startup.extensions = [
 
 An extension's state has `allowedInIncognito`, and `canAllowInIncognito`, which is false when its manifest refuses incognito or the Profile may not go off the record. Chrome's extensions page shows its switch only when that is true. `profile.setExtensionAllowedInIncognito` changes it. Chromium then reloads an extension that is on, as Chrome's page does, so its worker and pages start again. The page and your app change the same setting, and each change is reported as `.extensions`.
 
+## Pins and requests
+
+The pinned extensions are the ones whose buttons Chrome shows in its toolbar, in order. They are the Profile's, for all its windows, so your app reads and changes them through the Profile, with or without a window. `profile.pinnedExtensions` lists their IDs. `profile.setExtensionPinned` pins one last or unpins it, and `profile.moveExtension(_:to:)` moves a pinned one; an index past the end moves it last. Each Browser's action state reads `pinned` too, for drawing its toolbar.
+
+```swift
+try profile.setExtensionPinned(blockerID, true)
+try profile.moveExtension(blockerID, to: 0)
+```
+
+As in Chrome, an off-the-record Profile cannot change them and lists its original's, and a pin set by policy stays. An extension that is off is left out of the list and keeps its place, and pinning or moving it throws `.notAllowed`. So does pinning an extension in the moment after it loads, before Chromium has given it its action; `.extensions` reports when it has one.
+
+An extension's state also has `showsRequests`, whether it may show its requests for access to a site in the toolbar, as on Chrome's extensions page. `profile.setExtensionShowsRequests` changes it, for an extension on or off. Each change to the pins or to `showsRequests`, by your app or by the user in Chrome's menus, is reported as `.extensions`.
+
 ## What the user can do
 
 The user cannot remove your app's extension. Chrome's extensions page greys out Remove, and the extension's own `chrome.management.uninstallSelf` fails. Only your app removes one, by no longer giving it to the Profile. The user may still turn it off on Chrome's extensions page, as with any extension.
@@ -117,6 +130,7 @@ A component extension has more rights than any other:
 | Turned off or removed | Never, by the user or the app. Nobody can limit the sites it reads. It runs in off-the-record Profiles too. |
 | Extension APIs | Every API's checks of allowlists, locations and manifest versions pass. So it has Chromium's private APIs, such as `settingsPrivate`, `metricsPrivate` and `safeBrowsingPrivate`, and `processes`, `dns` and `hid`. |
 | Pages | It may script pages other extensions may not, and use `chrome://resources` and `chrome://theme`. It may let every page message it, through `externally_connectable`. |
+| Your schemes | Its content scripts may match your app's own schemes, the ones in `schemes`, when the pattern names one, as `app://ui/*`. `<all_urls>` does not reach them. Other extensions cannot name them. |
 
 So ship an internal extension only for code your app trusts as it trusts itself. Its ID comes from a key pair. Only the public half goes in the manifest, in bare base64 or as a PEM block with its BEGIN and END lines, and the folder is never signed:
 
@@ -207,6 +221,10 @@ A name the app does not declare goes to the hosts on disk, as in Chromium, and a
 | `profile.setExtensionEnabled` | `Profile::set_extension_enabled` | `Wren_SetExtensionEnabled` |
 | `profile.setExtensionAllowedInIncognito` | `Profile::set_extension_allowed_in_incognito` | `Wren_SetExtensionAllowedInIncognito` |
 | `profile.extensionState` | `Profile::extension_state` | `Wren_GetExtensionState` |
+| `profile.pinnedExtensions` | `Profile::pinned_extensions` | `Wren_GetPinnedExtensionCount`, `Wren_CopyPinnedExtensionID` |
+| `profile.setExtensionPinned` | `Profile::set_extension_pinned` | `Wren_SetExtensionPinned` |
+| `profile.moveExtension(_:to:)` | `Profile::move_extension` | `Wren_MoveExtension` |
+| `profile.setExtensionShowsRequests`, `ExtensionState.showsRequests` | `Profile::set_extension_shows_requests`, `ExtensionState::shows_requests` | `Wren_SetExtensionShowsRequests`, `WrenExtensionState.shows_requests` |
 | `.extensions` | `ChangeKind::Extensions` | `WREN_CHANGE_EXTENSIONS` |
 | `profile.installFromWebStore` | `Profile::install_from_web_store` | `Wren_InstallFromWebStore` |
 | `WebStoreInstallResult` | `WebStoreInstallResult` | `WrenWebStoreInstallResult` |

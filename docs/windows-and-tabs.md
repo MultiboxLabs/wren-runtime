@@ -97,6 +97,7 @@ tab.capture(&options, move |result| {
 - `maxWidth` and `maxHeight` are pixels. The picture keeps the page's shape, fits inside both, and is never larger than the page's own pixels: its view's size at its screen's scale. A JPEG is smaller than a PNG, which suits an HTML app's `data:` URL.
 - A background page has the size of its tab's view. A tab added in the background has the active tab's size. A page that leaves a `<wren-view>` element keeps the element's size while you have given its tab's view none, as an app that shows every tab in an element never does.
 - A discarded or crashed tab fails with `.noImage`, as does a page that draws nothing within 5 seconds. A tab a restore left unloaded starts loading and may fail too. Ask again once it has loaded.
+- `tab.state().unloaded` is true for a tab whose page waits to load until it is shown: one a restore left in the background, or a discarded one. A capture loads it, as Chrome's hover cards load a restored tab, so read `unloaded` first and show no picture for such a tab. After a restore, Chromium loads background tabs itself too, as Chrome does: at least 4, and up to 20 while memory allows, of those used in the last 30 days. So most restored tabs of a small session load soon; the rest, and discarded tabs, stay unloaded until shown.
 - The DisableScreenshots policy refuses a picture with `.notAllowed`, as Chrome refuses extensions' screenshots. `ignorePolicy` captures anyway, as Chrome's own hover cards do. Set it only for a picture that stays in your own UI, never for one you share or save.
 
 A tab switcher shows each tab's picture at once by keeping one per tab, as Chrome keeps its own. When the active tab changes, capture the tab that was active: its page draws once for the picture while it stays hidden, as Chrome's does for its thumbnails. Keep the picture by `tab.persistentID` if it should outlast the launch, take a new one when a card opens on the tab, keep a discarded tab's last one, and drop a closed tab's.
@@ -197,6 +198,43 @@ BrowserTab::move_popup_tab_to_new_browser(mt, tab, move |result| {
 
 The tab lands as `moveTabs` puts an unpinned tab, never pinned, and joins a group it lands inside. A page in full screen leaves it. Wren does not bring the window forward, and the popup, left with no tabs, closes after the call. Only the tab of a popup or an app popup moves. Any other throws `.notAllowed`. Offer the command only while the key window is a popup, as Chrome does, and decide whether to offer it in full screen, where Chrome turns it off.
 
+### A tab that ignores input
+
+When your own UI covers a tab, such as a sheet over it or the side of a split that peeks out from under another, `tab.setIgnoresInput(true)` makes its page ignore the mouse, the wheel, keys, drags and VoiceOver's actions, as Chromium's tab-modal dialogs make it. VoiceOver can still read the page. `tab.setIgnoresInput(false)` lets it take input again.
+
+- Keep the keyboard off the tab while it ignores. Its page still takes an input method's text, as a Japanese input method sends it, once it has the keyboard. `tab.focus()` throws `.notAllowed` for it, but the Tab key from a view beside it and AppKit's key view loop can still give it the keyboard. Move the keyboard to your own UI when you set it.
+- The setting stays with the tab when it moves to another window and when Chromium discards its page. The session does not keep it, as it does not keep muting.
+- `tab.state().ignoresInput` is your setting, and `.ignoresInput` in `tabFields` says when it changes. A block of Chromium's own, such as DevTools', is separate: lifting yours leaves it.
+
+### Keeping a tab on its site
+
+A tab can ask you before it goes to another page, as an app's home tab keeps to its own site and sends other links to new tabs. `tab.setWatchesNavigations(true)` turns it on, and `navigation` answers each request:
+
+```swift
+delegate.navigation = { request in
+    let here = URL(string: request.tab.url)?.host
+    let there = URL(string: request.url)?.host
+    return here == nil || here == there ? .allow : .openInNewTab
+}
+```
+
+- **Asked:** a navigation of the tab's page to another document, when it starts and at each redirect (`request.redirect`), whether a page, an extension or Chromium started it. `byPage` is true for a page's link, form or script and for an extension's `chrome.tabs.update`, with `initiatorOrigin` naming it. `userGesture` says a click or a key started it, and `post` that it sends a form.
+- **Not asked:** your own calls (`tab.navigate(to:)`, opening a suggestion or a bookmark), a reload, back and forward, a discarded or restored page loading again, a frame inside the page, a fragment, and `about:blank`. A watched tab does not prerender, so a page is never shown from a prerender unasked.
+- **The answers:** `.allow` goes ahead. `.cancel` stops it, and the tab stays on its page with no error page. `.openInNewTab` stops it and opens its URL in a new tab in front, next to the tab, as a `target=_blank` link opens; a form's POST is sent once, from the new tab. A redirect answered so loads the redirect's target there.
+- **The new tab** reads `openedBy` the tab, as a foreground tab, and `openedForNavigation` the request's `id`, by the time `changed` first gives it. So you know which tab your answer opened. Every other tab reads nil.
+- `navigation` runs inside Chromium's call. Decide and return; calls that navigate, such as `tab.navigate(to:)`, throw `.notAllowed` until it returns. A watched tab whose first navigation you send away stays blank: close it from `DispatchQueue.main.async` if you want.
+- The setting stays with the tab when it moves to another window and when Chromium discards its page. The session does not keep it. `tab.state().watchesNavigations` reads it, and `.watchesNavigations` in `tabFields` says when it changes.
+
+### A tab's media
+
+A tab that plays sound or video tells you what plays and lets you control it, as Chrome's media controls in its toolbar do. You draw the controls: a button, a bar, a row per tab.
+
+- `tab.state().media` says whether it is `.playing`, `.paused` or `.none`, which actions the page offers now (`actions`, `MediaAction` bits), and where it is: `positionMs` at the read, `durationMs`, `rate`, and `live` for a stream with no end. Chromium reports the position only when it jumps or the rate changes, so move your bar by `rate` between reports. `.media` in `tabFields` says when any of it changes.
+- `tab.mediaText(.title)`, `.artist`, `.album` and `.source` copy its texts. With no title from the page, the title is the page's own, and the source is the site, such as `example.com`. `tab.mediaArtworkPNG` is its artwork, at Chrome's size, nil until it arrives. `.mediaMetadata` in `tabFields` says when a text or the artwork changes.
+- `tab.controlMedia(.pause)` asks the page, and the result comes as a `.media` change. Play, pause and stop come with any media that can be played, and stop is Chrome's close button. The seeks go 5 seconds; `tab.seekMedia(to:)` goes to a position. The previous and next track, skip ad and Picture in Picture come when the page offers them. An action the page does not offer now throws `.notAllowed`. You may call these anywhere, inside any callback.
+- A call, such as a video meeting, may offer `.toggleMicrophone`, `.toggleCamera` and `.hangUp`, and `media.microphone` and `media.camera` say whether each is on, as the page says. They are reported even when there is nothing to play or pause.
+- macOS's Now Playing, the keyboard's media keys and the Picture in Picture window's buttons are Chromium's. They act on the same media, so their changes reach you as records too. Chromium also floats a call or a video in Picture in Picture by itself when you switch away from its tab, if the page asks for it.
+
 ### A crashed tab
 
 When a page's process dies, the tab's view shows nothing. Chromium's "Aw, snap!" page is part of Chrome's window, which a Wren app does not have. So you draw your own. `tab.state().crash` says why: crashed, killed, or out of memory. `.crashed` in `tabFields` says when. `tab.reload()` loads the page again.
@@ -222,6 +260,13 @@ delegate.browserOpened = { browser, type, opener in
 - `browser.isActive` says how Chromium wants it shown. If it is true, show the window and make it key. If it is false, Chromium showed it without activating it, as for a window an extension opens unfocused. Order it in behind the key window, so it does not take the keyboard: `window.order(.below, relativeTo: NSApp.keyWindow?.windowNumber ?? 0)`.
 - A Browser you ignore stays open with nowhere to show. If you do not want popups, close them.
 - `browser.requestedWindowState` is `.minimized` for a restored window that was minimised, or for one an extension created minimised. Show the window, then miniaturise it.
+- `opener` is the Browser of the tab that opened this one's first tab, or nil. Place a page's popup or a Shift-click's window near it, as Chrome does.
+
+### Which tab opened a tab
+
+`tab.state().openedBy` names the tab whose page opened this one, and `openedAs` says how: a foreground tab, as a link with `target=_blank` opens; a background tab, as a Cmd-click, a middle click or Open Link in New Tab opens; a window, as a Shift-click opens; or a popup. It is set by the time `changed` or `browserOpened` first gives the tab, and never changes. A noopener link hides the opener from the page, not from you. The record stays when the tab moves or Chromium discards its page, and after the opener closes. Then `openedBy` names a closed tab, which no call finds. A tab you add, an extension's and a restored tab have none: the session does not keep it.
+
+Use it for what Chrome does with its own: show "Opened from" on a hover card, put a closed tab's focus back on its opener, or group a page with the tabs it opened.
 
 ## What Chromium asks of a window
 
@@ -471,6 +516,14 @@ The address field with its suggestions, the site icon, extensions' buttons, and 
 | `group.move(to:)` | `TabGroup::move_to` | `Wren_MoveTabGroup` |
 | `split.move(to:)` | `TabSplit::move_to` | `Wren_MoveTabSplit` |
 | `tab.setSessionExcluded` | `BrowserTab::set_session_excluded` | `Wren_SetTabSessionExcluded` |
+| `tab.setIgnoresInput` | `BrowserTab::set_ignores_input` | `Wren_SetTabIgnoresInput` |
+| `tab.setWatchesNavigations` | `BrowserTab::set_watches_navigations` | `Wren_SetTabWatchesNavigations` |
+| `tab.state().media` | `TabState::media` | `WrenTabState.media` |
+| `tab.mediaText` | `BrowserTab::media_text` | `Wren_CopyTabMediaText` |
+| `tab.mediaArtworkPNG` | `BrowserTab::media_artwork_png` | `Wren_CopyTabMediaArtworkPNG` |
+| `tab.controlMedia` | `BrowserTab::control_media` | `Wren_ControlTabMedia` |
+| `tab.seekMedia(to:)` | `BrowserTab::seek_media` | `Wren_SeekTabMedia` |
+| `AppDelegate.navigation`, `NavigationRequest` | `App::navigation`, `NavigationRequest` | `on_navigation`, `WrenNavigationRequest` |
 | `browser.moveTabs` | `Browser::move_tabs` | `Wren_MoveTabsToBrowser` |
 | `BrowserTab.moveToNewBrowser` | `BrowserTab::move_to_new_browser` | `Wren_MoveTabsToNewBrowser` |
 | `browser.movePopupTab` | `Browser::move_popup_tab` | `Wren_MovePopupTabToBrowser` |

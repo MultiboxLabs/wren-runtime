@@ -1,9 +1,87 @@
-Copyright 2026 Multibox Labs. All rights reserved.
+Wren Runtime Licence
 
-Wren is proprietary software. No right to use, copy, modify, merge,
-publish, distribute, sublicense or sell it, or to make works based on it,
-is granted without the prior written permission of Multibox Labs.
+Copyright 2026 Avocado and Bear Limited, trading as Multibox Labs.
+All rights reserved.
 
-Wren builds on Chromium and other third-party software, each under its
-own licence. Those licences, not this one, govern those components; their
-notices ship with every Wren release.
+"Multibox Labs", "we" and "us" mean Avocado and Bear Limited, a company
+incorporated in Hong Kong, which trades as Multibox Labs. "Wren" means the
+Wren runtime in any release: its framework, headers, Swift package, Rust
+crate, page types, the `wren` command, its documents and its samples. "You"
+means the person or organisation that uses Wren. "Your organisation" means
+you, your employees, and contractors working for you.
+
+Wren is proprietary software. You may use it only as this licence or a
+written licence from Multibox Labs allows.
+
+1. Developing with Wren
+
+   You may download Wren, install it, and use it to develop, build and test
+   your own apps, on computers that you or your organisation control. Under
+   this section you may not give Wren, or an app that contains it, to anyone
+   outside your organisation.
+
+2. Wren Browser
+
+   You may use Wren to build, run, change and test Wren Browser, from
+   https://github.com/MultiboxLabs/wren-browser, and versions of it that you
+   change, and to contribute changes to it. You may not distribute a build of
+   Wren Browser, or of a changed version of it, that contains Wren. Wren
+   Browser's source code is under its own licence, which this licence does
+   not limit.
+
+3. Shipping an app
+
+   To distribute an app that contains Wren to anyone outside your
+   organisation, you need a written licence from Multibox Labs for that app.
+   That licence names the app and sets its terms. Ask for one at
+   licensing@wrenbrowser.com.
+
+4. What you may not do
+
+   Except as sections 1 to 3 or a written licence from Multibox Labs allow,
+   you may not copy, distribute, sublicense, sell, rent or lend Wren, or
+   publish it apart from an app. You may not remove or change its notices.
+   You may not reverse engineer, decompile or disassemble Wren, except where
+   the law allows it despite this term, or where a licence in section 6
+   allows it.
+
+5. Ownership
+
+   Multibox Labs owns Wren. This licence grants only the rights it states.
+   It grants no right in the names "Wren" and "Multibox Labs" or in their
+   logos.
+
+6. Other software in Wren
+
+   Wren contains Chromium and other software under their own licences, whose
+   notices are in each release's LICENSES folder. Those licences, not this
+   one, govern those parts, and nothing in this licence limits your rights
+   under them. Where a part is under the GNU Lesser General Public License,
+   you may change that part, and reverse engineer Wren to debug your
+   changes. The source of each such part that Wren changes is published with
+   each release, as LICENSES/Source.txt says.
+
+7. No warranty
+
+   Wren is provided "as is", without warranty of any kind, express or
+   implied, including warranties of merchantability, fitness for a
+   particular purpose and non-infringement.
+
+8. Limitation of liability
+
+   To the extent the law allows, Multibox Labs is not liable for any damage
+   that arises from Wren or its use, whether direct, indirect, incidental or
+   consequential, including lost profits and lost data, even if it was told
+   that such damage could happen.
+
+9. Ending
+
+   This licence ends at once if you break it. You must then stop using Wren
+   and delete every copy you have. Sections 5, 7, 8 and 10 continue after it
+   ends.
+
+10. Law
+
+   This licence is governed by the laws of the Hong Kong Special
+   Administrative Region. Its courts have exclusive jurisdiction over any
+   dispute about it.

@@ -89,7 +89,7 @@ A Browser is Chromium's `Browser`: a tab strip and what belongs to it, such as i
 
 - **Get one.** Make it with `profile.createBrowser(url:)`. Or receive it in `browserOpened` when Chromium opens one itself, for a popup, a `window.open`, undocked DevTools or a restored window.
 - **Attach it.** `browser.attach(to:)` tells Chromium which view of your window holds its tabs. Its dialogs and prompts then appear there, and the Browser counts as active while that window is key.
-- **Close it.** `browser.close()` asks it to close. A page may refuse with `beforeunload`. `browserClosed` says when the Browser has closed.
+- **Close it.** `browser.close { result in }` asks its pages first, and closes it once they agree. A page may refuse with `beforeunload`, and then the completion gets `WrenError.cancelled`. `Browser.close(_:completion:)` closes several, all or none, as quitting does. `browserClosed` says when each has closed, and the completion follows it.
 
 A Browser also closes when its last tab closes, as Chrome closes the window. Nothing keeps a Browser open with no tabs. To keep a window open, add a New Tab page before the last tab closes, or make a new Browser in `browserClosed`.
 
@@ -154,12 +154,13 @@ delegate.changed = { changes in
 | `windowRequest` | Chromium asks for a window to move, resize, minimise, zoom or restore. You do it, adapt it or ignore it. |
 | `popover` | Chromium is about to open a popover. You say whose it is. |
 | `fullscreen` | Chromium wants a window in or out of full screen. You say whether you will. |
-| `menuCommand` | The user chose one of your main menu's items. See [Menus](menus.md). |
+| `menuCommand` | The user chose one of your main menu's or Dock menu's items. See [Menus](menus.md). |
 | `downloadsPrompt` | Downloads in progress would be cancelled. You say whose prompt it is. |
 | `profileExtensions` | A Profile is loading. You say which of your extensions it gets, and how each starts. See [Extensions your app ships](extensions.md). |
 | `quitPrompt` | ⌘Q would warn before quitting. You say whose warning it is. |
+| `navigation` | A tab that watches its navigations is about to go to another page. You say whether it goes, stops or opens in a new tab. See [Windows and tabs](windows-and-tabs.md#keeping-a-tab-on-its-site). |
 
-`popover`, `fullscreen`, `downloadsPrompt`, `quitPrompt` and `quitCommitted` differ from the rest. They run inside Chromium's call. Chromium needs the answers of the first four to carry on, and runs `quitCommitted` before it closes anything. In them, decide and return. Wren refuses calls that change Browsers, tabs or popovers with `.notAllowed` until the callback returns. Do that work afterwards, for example with `DispatchQueue.main.async`. `profileExtensions` also runs inside Chromium's call, and makes no Wren calls at all.
+`popover`, `fullscreen`, `downloadsPrompt`, `quitPrompt`, `navigation` and `quitCommitted` differ from the rest. They run inside Chromium's call. Chromium needs the answers of the first five to carry on, and runs `quitCommitted` before it closes anything. In them, decide and return. Wren refuses calls that change Browsers, tabs, navigation or popovers with `.notAllowed` until the callback returns. Do that work afterwards, for example with `DispatchQueue.main.async`. `profileExtensions` also runs inside Chromium's call, and makes no Wren calls at all.
 
 ## Asynchronous calls
 
@@ -253,7 +254,7 @@ Rust's names are Swift's in Rust's case. The callbacks are the methods of the `A
 | `profile.offTheRecord()` | `Profile::off_the_record` | `Wren_GetOffTheRecordProfile` |
 | `profile.createBrowser` | `Profile::create_browser` | `Wren_CreateBrowser` |
 | `browser.attach(to:)` | `Browser::attach_to_view` | `Wren_AttachBrowserToView` |
-| `browser.close()` | `Browser::close` | `Wren_CloseBrowser` |
+| `browser.close`, `Browser.close(_:completion:)` | `Browser::close`, `Browser::close_all` | `Wren_CloseBrowsers` |
 | `browser.type` | `Browser::browser_type` | `Wren_GetBrowserType` |
 | `browser.windowFeatures` | `Browser::window_features` | `Wren_GetWindowFeatures` |
 | `browser.addTab` | `Browser::add_tab` | `Wren_AddTab` |

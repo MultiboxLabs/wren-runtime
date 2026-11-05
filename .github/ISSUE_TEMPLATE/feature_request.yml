@@ -1,0 +1,24 @@
+name: Feature request
+description: Wren cannot do something your app needs.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Search the open issues first. `docs/this-release.md` of your release lists what Wren does not do yet.
+  - type: textarea
+    id: need
+    attributes:
+      label: What your app needs
+      description: What you are building, and what Wren cannot do for it.
+    validations:
+      required: true
+  - type: textarea
+    id: chromium
+    attributes:
+      label: How Chrome does it
+      description: If Chrome or another Chromium browser already does this, say where to see it.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do now
+      description: How you work around it today, if you can.

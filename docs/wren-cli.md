@@ -17,22 +17,26 @@ It is the only command a release ships. Wren's own build tools are not part of i
 
 ## Installing `wren`
 
-Releases are published in the private repository `MultiboxLabs/wren-runtime`. With access to it, and the GitHub CLI signed in, put `wren` in a folder on your `PATH`:
+Releases are published in the public repository `MultiboxLabs/wren-runtime`. Its install script puts `wren` in `~/.local/bin`:
 
 ```sh
-gh release download --repo MultiboxLabs/wren-runtime --pattern wren \
-  --output ~/.local/bin/wren
-chmod +x ~/.local/bin/wren
+curl -fsSL https://wrenbrowser.com/runtime/cli/install.sh | sh
 ```
 
-That is the newest release's `wren`. Any release's `wren` works with the others.
+That is the newest release's `wren`. Any release's `wren` works with the others. The script checks `wren` against the release's `SHA256SUMS`, and says if the folder is not on your `PATH`. It reads these:
+
+| Variable | What it does |
+| --- | --- |
+| `WREN_VERSION` | Installs that release's `wren`, such as `0.4.0`, not the newest |
+| `WREN_INSTALL_DIR` | Installs into that folder, not `~/.local/bin` |
+| `WREN_RELEASES_URL` | Fetches from a mirror of the releases page, not GitHub |
 
 ## `wren install`
 
 Run in a project's folder, beside its `wren-app.json`:
 
-1. It reads the release the manifest names, such as `"wren": "0.3.0"`.
-2. When that release is not on this Mac, it fetches its zip and `SHA256SUMS` from `MultiboxLabs/wren-runtime`. It signs in with `GH_TOKEN` or `GITHUB_TOKEN`, or else with the GitHub CLI's sign-in.
+1. It reads the release the manifest names, such as `"wren": "0.4.0"`.
+2. When that release is not on this Mac, it fetches its zip and `SHA256SUMS` from `MultiboxLabs/wren-runtime`. It needs no sign-in. It uses `GH_TOKEN` or `GITHUB_TOKEN`, or else the GitHub CLI's sign-in, when there is one. GitHub allows 60 requests an hour from an address without one, and `wren install` makes three for a release.
 3. It refuses a zip that does not match `SHA256SUMS`.
 4. It unpacks the zip into `~/.wren/runtimes/<version>`, or into `$WREN_RUNTIMES/<version>` when that is set, such as for a CI cache.
 5. It links `.wren/runtime` in the project to that release, and keeps `.wren` out of git.
@@ -157,7 +161,7 @@ It keeps a small record of each bundle in `~/Library/Caches/dev.multibox.wren-ru
 | `resources` | no | Files and folders copied into `Contents/Resources`. |
 | `frameworks` | no | Frameworks the executable links, such as Sparkle's, copied into `Contents/Frameworks` and signed with the app (below). |
 | `infoPlist` | no | Keys added to the app's `Info.plist`, such as Sparkle's feed and public key. It may not set a key `wren bundle` writes from another field, or a usage description. |
-| `wren` | no | The Wren release the app is built with, such as `"0.3.0"`: what `wren install` links and `wren bundle` takes the framework from. |
+| `wren` | no | The Wren release the app is built with, such as `"0.4.0"`: what `wren install` links and `wren bundle` takes the framework from. |
 
 A field of the wrong type, or a `name` or `bundleId` that cannot be used, stops the command with a message that names it.
 
@@ -181,7 +185,7 @@ Compiling an icon takes about a second, so `wren bundle` keeps each compiled ico
 ### What the bundle contains
 
 - **The framework**, copied to `Contents/Frameworks/Wren Framework.framework`.
-- **Helper apps named after the app**, inside the framework: `<name> Helper`, `<name> Helper (Renderer)`, `<name> Helper (GPU)` and `<name> Helper (Alerts)`. Their bundle IDs are `<bundleId>.helper`, `<bundleId>.helper.renderer` and `<bundleId>.framework.AlertNotificationService`. The Alerts helper takes the app's display name and icon, which macOS shows on alert-style notifications. The framework's Aperitif helpers are left out, because Chromium does not use them: their feature, `AperitifHelpers`, is off by default.
+- **Helper apps named after the app**, inside the framework: `<name> Helper`, `<name> Helper (Renderer)`, `<name> Helper (GPU)` and `<name> Helper (Alerts)`, and the same four with `Aperitif` in the parentheses, such as `<name> Helper (Aperitif Renderer)`, from which Chromium starts its processes. Their bundle IDs are `<bundleId>.helper`, `<bundleId>.helper.renderer` and `<bundleId>.framework.AlertNotificationService`. The Alerts helpers take the app's display name and icon, which macOS shows on alert-style notifications.
 - **`Info.plist`**, from Chromium's, with the app's identity. Chromium's URL types, document types and type declarations are removed, so the app claims only what the manifest lists, and `infoPlist`'s keys are added. The key `WrenHelperName` tells the framework where the helpers are. Do not remove it.
 - **Localised usage descriptions.** For every language Chromium has, its permission-prompt texts with the app's display name in place of "Chromium". Chromium picks its UI language from these folders, so they are all kept. A description given in the manifest replaces the localised one for that key, in every language.
 - **The icon**, from the manifest's. That is `app.icns` from a PNG, or `Assets.car` and an `.icns` from an Icon Composer icon.
@@ -307,8 +311,8 @@ For a folder, the ID comes from the `key` in its `manifest.json`, as Wren reads 
 - **The first launch of a new bundle is slow.** macOS scans a bundle it has not seen before when it first starts, before the framework loads. With a development build's framework the scan took about 4 seconds, and later launches a fraction of a second. A bundle made again from scratch at the same path is scanned again. `--incremental` keeps the bundle, so only its first launch waits.
 - **Started from a terminal, the terminal is named.** macOS attributes permission prompts and notifications to the app responsible for the process. Run the executable directly from a shell, and prompts say the terminal's name. Start the app with `open`, or from Finder, and they say the app's.
 - **An empty folder in Application Support.** A bundled app creates `~/Library/Application Support/<name>`, Chromium's default data folder, even when its data is elsewhere. Crash reports go to `Crashpad` inside the app's user-data directory.
-- **One framework per app.** Each app carries its own copy, about 340 MB in release 0.3.0, as Electron apps do. It must be bundled with the release it was compiled against, because the framework accepts only its own API version.
-- **Chromium's notices go with the app.** The framework is Chromium, whose licence and third-party licences ask that their notices go with every copy. A release has them in `LICENSES`: `Chromium.txt`, `third-party.txt`, and `credits.html`, the page an app's `chrome://credits` shows. Ship them with your app, for example in its About window or beside its own licence.
+- **One framework per app.** Each app carries its own copy, about 350 MB in release 0.4.0, as Electron apps do. It must be bundled with the release it was compiled against, because the framework accepts only its own API version.
+- **Chromium's notices go with the app.** The framework is Chromium, whose licence and third-party licences ask that their notices go with every copy. A release has them in `LICENSES`: `Chromium.txt`, `third-party.txt`, and `credits.html`, the page an app's `chrome://credits` shows. `Source.txt` says where the source of the LGPL and MPL files Wren changes is, which the people who get your app may ask for. Ship all four with your app, for example in its Resources folder, linked from its About window.
 
 ## Not done yet
 

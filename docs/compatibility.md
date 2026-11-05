@@ -32,6 +32,42 @@ Each release pins one Chromium version, which `Wren_GetVersionInfo` reports. A p
 
 Each release lists here what it removed or changed in the core, and what an app does about it. A release not listed has none.
 
+### v0.4.0
+
+**A tab's `last_active_ms` is the current time while it is its Browser's active tab,** shown or not: in a minimised, covered or background window, or on another Space, as Chrome never takes the active tab for idle. Another tab reads when it was hidden or stopped being active, whichever came later. Before, the active tab of a window not on screen read the time it was hidden. The field is `last_active_ms` in C and Rust, and `lastActiveMs` in Swift.
+
+To move: an app that closes or unloads idle tabs needs no change, and now leaves every window's active tab alone. An app that used the field to find tabs in a window not on screen reads its own window's state instead.
+
+**`on_browser_opened`'s `opener` is the Browser of the tab that opened the first tab,** from Chromium's record of the open, not from the page's `window.opener`. A noopener link's or popup's window, a Shift-click's window and Open Link in New Window's now name their opener, where before they gave none. The argument is `opener` in C, `opener: Browser?` in Swift's `browserOpened` and `opener: Option<Browser>` in Rust's `App::browser_opened`; only its meaning changes.
+
+To move: an app that took a non-null opener to mean the page can script its new window reads the page's own state instead; one that placed windows by their opener needs no change.
+
+**A tab's state says whether it waits to load, whether it ignores input, and which tab opened it:** `unloaded`, `ignores_input`, `opened_by` and `opened_as`, with the new enum `WrenTabOpenedAs`. In C and Swift nothing changes: the fields are new at the end of `WrenTabState`, and Swift's `TabState` has no public initialiser. In Rust, `TabState` gains `unloaded`, `ignores_input`, `opened_by` and `opened_as`, so a struct literal or a pattern of it without `..` must name them. The new `tab_fields` bit, `IGNORES_INPUT`, breaks nothing.
+
+**A tab's state says whether it watches its navigations, and which request opened it:** `watches_navigations` and `opened_for_navigation`, with `on_navigation` and `Wren_SetTabWatchesNavigations`. In C and Swift nothing changes: the fields are new at the end of `WrenTabState`, and the new delegate member is last in `WrenAppDelegate`, so an app that zero-fills it, or Swift's `AppDelegate`, leaves it NULL. In Rust, `TabState` gains `watches_navigations: bool` and `opened_for_navigation: Option<NavigationID>`, so a struct literal or a pattern of it without `..` must name them. `App::navigation` has a default that allows every navigation.
+
+**A tab's state says what its media is doing:** `media`, a `WrenTabMedia`, with `Wren_CopyTabMediaText`, `Wren_CopyTabMediaArtworkPNG`, `Wren_ControlTabMedia` and `Wren_SeekTabMedia`. In C and Swift nothing changes: the field is new at the end of `WrenTabState`, and Swift's `TabState` has no public initialiser. In Rust, `TabState` gains `media: TabMedia`, so a struct literal or a pattern of it without `..` must name it. The new `tab_fields` bits, `MEDIA` and `MEDIA_METADATA`, break nothing.
+
+**Pinning, moving and showing requests take the Profile,** as they change the Profile's settings, and work with no window. An off-the-record Profile refuses showing requests with `WREN_ERROR_NOT_ALLOWED` now too, as it refused pins. Pinning or moving an extension that is off gives `WREN_ERROR_NOT_ALLOWED`, where before it had no action and gave `WREN_ERROR_INVALID_ARGUMENT`, and an ID that is not installed gives `WREN_ERROR_INVALID_ARGUMENT`. The Browser's calls are gone, with nothing left in their place.
+
+| C | Swift | Rust |
+| --- | --- | --- |
+| `Wren_SetExtensionActionPinned(browser, …)` becomes `Wren_SetExtensionPinned(Wren_GetBrowserProfile(browser), …)` | `browser.setExtensionActionPinned` becomes `browser.profile?.setExtensionPinned` | `Browser::set_extension_action_pinned` becomes `Profile::set_extension_pinned` on `browser.profile()` |
+| `Wren_MoveExtensionAction(browser, …)` becomes `Wren_MoveExtension(Wren_GetBrowserProfile(browser), …)` | `browser.moveExtensionAction(_:to:)` becomes `browser.profile?.moveExtension(_:to:)` | `Browser::move_extension_action` becomes `Profile::move_extension` |
+| `Wren_SetExtensionShowsRequests` takes `Wren_GetBrowserProfile(browser)` in place of `browser` | `browser.setExtensionShowsRequests` becomes `browser.profile?.setExtensionShowsRequests` | `Browser::set_extension_shows_requests` becomes `Profile::set_extension_shows_requests` |
+
+`WrenExtensionState` gains `shows_requests` at its end, so C and Swift need no other change. In Rust, `ExtensionState` gains `shows_requests: bool`, so a struct literal or a pattern of it without `..` must name it. A C compiler warns at the old argument's type of `Wren_SetExtensionShowsRequests`, and C++ refuses it.
+
+**Each extension in `on_profile_extensions`' request names its ID:** `WrenProfileExtension` gains `id` first. In C an app that reads the entries Wren gives needs no change, but one that builds a `WrenProfileExtension` with positional initialisers gives its first value to `id` now; Wren ignores what the app writes there. Swift's `ProfileExtension` gains `id` and has no public initialiser, so nothing breaks. In Rust, `ProfileExtension` gains `id: String` and is no longer `Copy`.
+
+To move: in Rust, clone an entry where the code copied one, and name `id` in a struct literal or a pattern without `..`. In C, use designated initialisers.
+
+**`Wren_CloseBrowsers` replaces `Wren_CloseBrowser`,** and says how the close ended. It takes several Browsers and closes all or none, as quitting does: each page's beforeunload asks first, then the downloads question of an off-the-record Profile the close would leave with no Browser. Its required callback gets `WREN_OK` after `on_browser_closed` for each one, or `WREN_ERROR_CANCELLED` when a page or the question kept them open, or when a quit started meanwhile. A Browser already in a request, one whose Profile is being deleted, and any during a quit are refused with `WREN_ERROR_NOT_ALLOWED`. In Swift, `browser.close() throws` becomes `browser.close(_ completion:)`, beside `Browser.close(_:completion:)` for several. In Rust, `Browser::close(&self) -> Result<(), Error>` becomes `close(&self, completion)`, beside `Browser::close_all(&[Browser], completion)`. Neither throws or returns a result.
+
+`Wren_DeleteProfile` now also refuses, with `WREN_ERROR_NOT_ALLOWED`, a Profile with a Browser in a close request, and any during a quit. Before, a quit while a deletion asked left the deletion unanswered.
+
+To move: in C, call `Wren_CloseBrowsers(&browser, 1, callback, context)`, and close the app's window in the callback on `WREN_OK` rather than before asking. In Swift and Rust, pass a completion, or `{ _ in }` and `|_| {}` to keep the old behaviour. An app that closed a window of several Browsers one by one closes them in one call, so a Stay keeps them all.
+
 ### v0.3.0
 
 **`Startup` in Rust has a new field, `native_hosts`,** the native messaging hosts the app answers. It is empty in `Startup::new`. An app that builds a `Startup` as a struct literal must name it, or end the literal with `..Startup::new(…)`. C's `WrenStartup` and Swift's `Startup` gain the field too, with nothing to change: a C startup with the new fields zeroed, and a Swift one that leaves the field out, declare no host.

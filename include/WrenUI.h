@@ -454,8 +454,8 @@ typedef struct WrenExtensionOnSite {
   bool can_access_on_click;
   bool can_access_on_site;
   bool can_access_on_all_sites;
-  // True if it may show its requests for access in the toolbar
-  // (Wren_SetExtensionShowsRequests).
+  // True if it may show its requests for access in the toolbar. This is
+  // the Profile's setting (Wren_SetExtensionShowsRequests).
   bool shows_requests;
   // True if policy installed it.
   bool enterprise;
@@ -478,11 +478,6 @@ WREN_API WrenResult Wren_SetExtensionSiteAllowed(WrenBrowser* browser,
                                                  WrenPageToken page,
                                                  const char* extension_id,
                                                  bool allowed);
-// Sets whether the extension may show its requests for access in the
-// toolbar.
-WREN_API WrenResult Wren_SetExtensionShowsRequests(WrenBrowser* browser,
-                                                   const char* extension_id,
-                                                   bool show);
 
 // The extensions asking for access to the site, in Chrome's order: their
 // number, and the ID of each.

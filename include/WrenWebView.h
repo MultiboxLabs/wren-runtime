@@ -419,9 +419,14 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 // it draws only where the glass does not. Glass cannot draw while the window
 // is captured, as in screen sharing, or in a frame that Chromium draws without
 // Core Animation layers. It does that for the whole window while the view's
-// page has a backdrop-filter on an element without glass, or too many layers
-// to give each one its own. A tab or side panel the page shows draws apart
-// from it, so a website there never stops the page's glass.
+// page has too many layers to give each one its own, or a backdrop-filter that
+// Core Animation cannot draw: one with url() or drop-shadow(), on an element
+// with a mask, a clip-path or a filter, or on corners of different radii. A
+// backdrop-filter of blur() and colour filters on any other element draws with
+// Core Animation, beside the glass, and sees glass beneath it. It blurs what
+// is behind it in the window, so in a transparent page it blurs the window
+// behind the view too, as glass does. A tab or side panel the page shows
+// draws apart from it, so a website there never stops the page's glass.
 //
 // Every page in the view may use glass, in every frame and of any origin: it
 // changes only how the page's own pixels draw. The properties do not exist in

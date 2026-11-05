@@ -57,6 +57,23 @@ In Rust the calls are on `MainThread`: `set_main_menu`, `update_main_menu_item` 
 
 The call replaces the menu Wren installed at startup (`Startup.menu`). After it, do not edit `NSApp.mainMenu` yourself. An app that would rather build an `NSMenu` still may, and then does not call `setMainMenu`. If a menu is open, the change waits until it closes.
 
+## The Dock menu
+
+Right-clicking the app's Dock icon shows the system's items: the windows, Options, Show All Windows, Hide and Quit. `WrenApp.setDockMenu` adds yours above them:
+
+```swift
+try WrenApp.setDockMenu([
+    .item(id: "new-window", label: "New Window"),
+    .item(id: "new-incognito-window", label: "New Incognito Window"),
+])
+```
+
+- Chosen items reach `menuCommand` with their ID, as the main menu's do, so an ID may be a main menu item's to share its command. Wren does not activate the app. An item that shows a window calls `NSApp.activate()` itself.
+- It takes items with an ID and a label, and separators: what a taskbar's Jump List can also show on Windows. A submenu, a system or Chromium item, a key, or a disabled, checked or hidden item throws `.invalidArgument`, and the menu stays as it was.
+- An empty list clears it. Without one, the Dock shows only the system's items: Chrome's own, which open Browsers you never asked for, are not offered.
+
+In Rust it is `MainThread::set_dock_menu`, and in C `Wren_SetDockMenu`.
+
 ## Asking before quitting
 
 Chrome's Warn Before Quitting is on unless the user or policy turned it off. While it is on, the Quit role's key, ⌘Q, warns before quitting, as in Chrome. Choosing Quit with the pointer, the Dock's Quit, logging out and `WrenApp.quit()` never warn. A page's `beforeunload`, or downloads in progress, can still stop the quit afterwards.

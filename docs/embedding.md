@@ -17,7 +17,7 @@ Chromium has to start before `NSApplication` does, and it runs the event loop it
 import AppKit
 import Wren
 
-var delegate = AppDelegate(browserOpened: { browser, _, _ in try? browser.close() })
+var delegate = AppDelegate(browserOpened: { browser, _, _ in browser.close { _ in } })
 delegate.ready = ready              // create your windows here
 
 var startup = Startup(userDataDirectory: directory, keychain: .mock)
@@ -49,7 +49,7 @@ DevTools arrives there too. `openDevTools()` on a web view makes a `.devtools` B
 
 ```swift
 var delegate = AppDelegate(browserOpened: { browser, type, _ in
-    if type == .devtools { showInWindow(browser) } else { try? browser.close() }
+    if type == .devtools { showInWindow(browser) } else { browser.close { _ in } }
 })
 ```
 
