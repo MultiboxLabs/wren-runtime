@@ -1,21 +1,29 @@
 # Views in a web view
 
-The page of a [web view](web-views.md) can show tabs and side panels inside itself. So a browser's whole window can be one page of HTML. Where an app with native UI places a view, your page writes an element:
+A [web view](web-views.md)'s page can show tabs and side panels inside itself, so your browser's whole window can be one HTML page. Where a native app would place a tab's view, your page writes an element, and Wren Runtime puts the tab's page in it:
 
 ```html
 <wren-view data-id="tab-5"></wren-view>
 <wren-view data-id="sidepanel-2"></wren-view>
 ```
 
-Wren fills the element and keeps it filled. The pages are drawn in the element, at its size, and the user uses them there. Clicks, keys and focus reach them. The element sits in your page like any other, so your own HTML can be drawn over it and your CSS styles it. It is a stacking context of its own, with `isolation: isolate`. HTML after it, or with a higher `z-index`, is drawn over the page.
+The tab's page draws in the element, at the element's size, and takes clicks, keys and focus there. Otherwise the element is like any other in your page. Your CSS styles it, and your own HTML can draw over it. It's a stacking context of its own, so HTML after it, or with a higher `z-index`, draws over the tab.
 
-The API is in the "Views in a web view" section of [`WrenWebView.h`](../include/WrenWebView.h). What works in this release is in [This release](this-release.md).
+## Showing a tab in your page
 
-Make the view with `embedsViews`, and give its page the IDs:
+Make the web view with `embedsViews`, and tell its page which IDs to show, here in its address:
 
 ```swift
 let url = "app://ui/window.html?tab=\(tab.id)&browser=\(browser.id)"
 let webView = WebView(profile: profile, url: url, embedsViews: true)
+browser.attach(to: webView?.view)
+```
+
+```rust
+let url = format!("app://ui/window.html?tab={}&browser={}", tab.id(), browser.id());
+let options = WebViewOptions { embeds_views: true, ..WebViewOptions::default() };
+let web_view = WebView::new(&profile, &url, &options).expect("a web view");
+browser.attach_to_view(Some(web_view.view()));
 ```
 
 ```css
@@ -26,35 +34,66 @@ wren-view {
 }
 ```
 
-In Rust, set `WebViewOptions::embeds_views`, and use `BrowserTab::id` and `Browser::id`. In C, set `WrenWebViewOptions.embeds_views`, and use a tab's `WrenTabID` and `Wren_GetBrowserID`.
+Attach the Browser to the web view's own view, as above. The web view's window then counts as the Browser's window, and Chromium centres a tab's dialogs, such as an alert or an HTTP sign-in, over the tab's element, inside the web view.
 
-## What each element holds
+Give the element a size, such as with `display: block`. Until Wren Runtime defines the element, a moment after your page starts, it's an unknown inline element.
 
-| `data-id` | Holds | The native view it stands for |
+Your page can learn the IDs from its address, as here, or by [asking your app](messages.md), and your app can tell it when they change.
+
+## What an element can show
+
+| `data-id` | What it shows | The native view it stands in for |
 | --- | --- | --- |
-| `tab-` and a tab's ID | The tab's page, docked DevTools beside it with its divider, and a scrim while a dialog blocks the tab | `tab.view` |
+| `tab-` and a tab's ID | The tab's page, with docked DevTools and its divider, and a dimmed cover while a dialog blocks the tab | `tab.view` |
 | `sidepanel-` and a Browser's ID | The Browser's open side panel, or nothing | `browser.sidePanelView` |
 
-Your page does nothing when DevTools docks or moves, when a tab's page is replaced, or when the panel changes. Split tabs need no element of their own. Show both tabs' elements with your own divider between them.
+Wren Runtime keeps the element filled. Your page has nothing to do when DevTools docks or moves, when Chromium replaces a tab's page, or when another side panel opens.
 
-## Rules
+## Switching tabs
 
-- **Only one page may show views.** That is the main frame of a view made with `embedsViews`, while its page is on one of [your schemes](schemes.md) or on one of the view's [trusted origins](web-views.md#trusted-origins), which are for a development server. To a tab on either, a frame inside the view's page, or a view that has gone anywhere else, the element is nothing.
-- **A page is in an element or in its native view, never both.** While an element shows a tab, `tab.view` is empty, and the same is true of a side panel. When the element goes, or the web view ends, the pages go back to their native views.
-- **One element at a time.** A second element with the same `data-id` takes the tab from the first.
-- **A split is two elements.** A press or a key in the side that is not the active tab makes it active, as in a native window. You hear it as a change, and do nothing to make it happen.
-- **Switching tabs is yours.** Change the element's `data-id`, or keep one element per tab and show one. A tab's element shows a new page at once, and is empty until that page has drawn. A side panel's element keeps the old page showing until the new one has drawn.
-- **An element with nothing to show is empty.** That is so for a closed tab, a closed panel, or an ID that names nothing.
-- **The tab is still a tab.** Its ID, history, session and changes are as before, and so is everything you do to it through its Browser. The pages cannot script each other.
-- **Focus waits for the page.** `tab.focus()` moves keyboard focus to the tab inside the web view once the element has the tab's page. That page arrives a moment after your page asks for it. The tab's `state().inElement` turns true then, and `changed` reports `.inElement`. Give a newly active tab the keyboard at that change.
-- **A group's or a split's ID is text for your page.** Use `String(group)` and `TabGroup(text)`, and the same for a split. In C these are `Wren_FormatTabGroupID` and `Wren_ParseTabGroupID`.
-- **Your page learns the IDs from you,** in its address, or by [asking your app](messages.md). Your app can also tell it when they change.
-- **Give the element a size.** Until Wren has defined the element, a moment after your page starts, it is an unknown inline element.
-- **Attach the Browser to the web view's own view,** with `browser.attach(to: webView.view)`. That makes the window the Browser's, and Chromium places its own UI for the tab from that view. A tab's dialogs, such as an alert or HTTP sign-in, are then centred over the tab's element and kept inside the web view. A Browser attached to another window puts them in that window instead.
-- **Mind your `Content-Security-Policy`.** Wren defines the element with a script it adds to your page, and fills it with plugin elements. A policy that forbids inline script or `object-src` leaves the element empty.
+To show another tab, change the element's `data-id`, or keep an element for each tab and show one at a time. A tab's element switches at once, and stays empty until the new page has drawn. A side panel's element keeps the old panel showing until the new one has drawn.
 
-## What is missing
+A split needs no element of its own. Show both tabs' elements, with a divider of your own between them. A click or a key in the side that isn't active makes it the active tab, as in a native window, and you hear about it as a change.
 
-- An open dialog does not follow an element that moves without changing size. It catches up at the next resize, or when the window moves.
-- Wren does not tell your page that a side panel opened or how wide it wants to be. Your app is told, and can [tell the page](messages.md).
-- An extension's side panel has not been tried in an element.
+`tab.focus()` gives the keyboard to the tab inside the web view, once the element has the tab's page. The page arrives a moment after your page asks for it. Then the tab's `state().inElement` turns true, and `changed` reports `.inElement`, so give a newly active tab the keyboard at that change.
+
+## The pointer over a view
+
+Your page hears the pointer move onto and off a view, as it would for an iframe. The element gets `pointerenter` when the pointer moves onto the tab's page, and `pointerleave` when it moves off, onto your own HTML or onto another element. HTML you draw over the tab counts as your page's, so a card over the tab takes the pointer from the element, and the element gets it back when the pointer returns to the tab. Hover cards, tooltips and a sidebar that hides itself need no native code:
+
+```js
+const tabView = document.querySelector('wren-view[data-id^="tab-"]');
+tabView.addEventListener("pointerenter", () =>
+  sidebar.classList.remove("open"),
+);
+```
+
+While the pointer is over the tab, the tab's page gets its moves, and your page gets no `pointermove`.
+
+Your page misses one case. When the pointer leaves the web view straight from the tab, such as out of the window, only the tab's page is told. The element keeps the pointer, with no `pointerleave`, until the pointer comes back. Chromium treats an iframe at the edge of Chrome's window the same way. If your UI needs to know, have your app watch for the pointer leaving the window and [tell your page](messages.md).
+
+## Things to know
+
+- **A page is in one place at a time.** While an element shows a tab, `tab.view` is empty, and the same goes for a side panel. When the element goes, or the web view ends, the pages go back to their native views.
+- **One element for each ID.** A second element with the same `data-id` takes the tab from the first.
+- **An element with nothing to show stays empty,** such as for a closed tab, a closed panel, or an ID that names nothing.
+- **The tab is still a tab.** Its ID, history, session and changes stay as they were, and so does everything you do to it through its Browser. Your page and the tab's page can't script each other.
+- **Only your own page can show views.** That's the main page of a web view made with `embedsViews`, while it's on one of [your schemes](schemes.md) or a [trusted development server](web-views.md#trusting-a-development-server). Anywhere else, including in a tab or in a frame inside your page, the element shows nothing.
+- **Group and split IDs are text in your page.** `String(group)` turns a `TabGroup` into text, and `TabGroup(text)` turns it back, and splits work the same way.
+- **Your `Content-Security-Policy` must allow it.** Wren Runtime defines the element with a script it adds to your page, and fills it with plugin elements. A policy that forbids inline scripts or `object-src` leaves the element empty.
+
+## Not available yet
+
+- An open dialog doesn't follow an element that moves without changing size. It catches up at the next resize, or when the window moves.
+- Your page isn't told when a side panel opens, or how wide it wants to be. Your app is told, and can [tell the page](messages.md).
+- An extension's side panel hasn't been tried in an element.
+
+## The names in Swift, Rust and C
+
+| Swift | Rust | C |
+| --- | --- | --- |
+| `embedsViews: true` | `WebViewOptions::embeds_views` | `WrenWebViewOptions.embeds_views` |
+| `tab.id` | `BrowserTab::id` | `WrenTabID` |
+| `browser.id` | `Browser::id` | `Wren_GetBrowserID` |
+| `tab.state().inElement` | `TabState::in_element` | `WrenTabState.in_element` |
+| `String(group)`, `TabGroup(text)` | `TabGroup::to_string`, `TabGroup::parse` | `Wren_FormatTabGroupID`, `Wren_ParseTabGroupID` |

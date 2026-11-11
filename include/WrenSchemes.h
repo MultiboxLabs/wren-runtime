@@ -76,20 +76,25 @@ typedef struct WrenSchemeRequestInfo {
 WREN_API WrenResult Wren_GetSchemeRequestInfo(WrenSchemeRequest* request,
                                               WrenSchemeRequestInfo* info);
 
-// The three calls below copy text as Wren_CopyTabStatusText does. Each returns
-// the length needed, including the NUL, or 0 for a request that has been
-// answered.
+// Which of a request's strings Wren_CopySchemeRequestText copies.
+typedef enum WrenSchemeRequestText {
+  // The whole URL, as Chromium canonicalizes it, such as
+  // "app://ui/index.html?x=1".
+  WREN_SCHEME_REQUEST_TEXT_URL = 0,
+  // The method, such as "GET" or "POST".
+  WREN_SCHEME_REQUEST_TEXT_METHOD = 1,
+} WrenSchemeRequestText;
 
-// The whole URL, as Chromium canonicalizes it, such as
-// "app://ui/index.html?x=1".
-WREN_API size_t Wren_CopySchemeRequestURL(WrenSchemeRequest* request,
-                                          char* buffer,
-                                          size_t size);
-// The method, such as "GET" or "POST".
-WREN_API size_t Wren_CopySchemeRequestMethod(WrenSchemeRequest* request,
-                                             char* buffer,
-                                             size_t size);
-// The value of the request header `name`, matched in any case. "" if the
+// The two calls below copy text in UTF-8. Each returns the length needed,
+// including the NUL, or 0 for a request that has been answered.
+
+// Copies one of the request's strings. A value outside WrenSchemeRequestText
+// copies "".
+WREN_API size_t Wren_CopySchemeRequestText(WrenSchemeRequest* request,
+                                           WrenSchemeRequestText text,
+                                           char* buffer,
+                                           size_t size);
+// Copies the value of the request header `name`, matched in any case. "" if the
 // request has no such header. Pages send few headers on their own: Accept,
 // Range for media, and whatever was passed to fetch().
 WREN_API size_t Wren_CopySchemeRequestHeader(WrenSchemeRequest* request,

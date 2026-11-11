@@ -151,19 +151,24 @@ WREN_API WrenDownloadID Wren_GetDownloadAt(WrenProfile* profile, size_t index);
 // has, because it was discarded or removed, or its Profile closed.
 WREN_API WrenResult Wren_GetDownloadState(WrenDownloadID download,
                                           WrenDownloadState* state);
-// Copies the file's name, as Chrome shows it.
-WREN_API size_t Wren_CopyDownloadFileName(WrenDownloadID download,
-                                          char* buffer,
-                                          size_t size);
-// Copies the file's path, where it is or where it will be once done. "" until
-// Chromium has chosen it.
-WREN_API size_t Wren_CopyDownloadPath(WrenDownloadID download,
+// Which of a download's strings Wren_CopyDownloadText copies.
+typedef enum WrenDownloadText {
+  // The file's name, as Chrome shows it.
+  WREN_DOWNLOAD_TEXT_FILE_NAME = 0,
+  // The file's path, where it is or where it will be once done. "" until
+  // Chromium has chosen it.
+  WREN_DOWNLOAD_TEXT_PATH = 1,
+  // The URL the file came from, after redirects.
+  WREN_DOWNLOAD_TEXT_URL = 2,
+} WrenDownloadText;
+
+// Copies one of the download's strings, in UTF-8. Returns the length needed,
+// including the NUL. A download Chromium no longer has copies "", and so does
+// a value outside WrenDownloadText.
+WREN_API size_t Wren_CopyDownloadText(WrenDownloadID download,
+                                      WrenDownloadText text,
                                       char* buffer,
                                       size_t size);
-// Copies the URL the file came from, after redirects.
-WREN_API size_t Wren_CopyDownloadURL(WrenDownloadID download,
-                                     char* buffer,
-                                     size_t size);
 
 // Does what Chrome's bubble does for `action`. Returns WREN_ERROR_NOT_ALLOWED
 // when `action` is not among the download's actions, and inside on_popover.

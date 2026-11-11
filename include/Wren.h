@@ -10,8 +10,9 @@
 // DevTools and permission prompts. The app owns its windows and draws its own
 // browser UI. Wren draws no window of its own, and opens no Browser by itself.
 //
-// This header has startup, the changes Wren reports, the app's callbacks, and
-// the types every other header uses. It includes the other headers, listed at
+// This header has startup, the changes Wren reports, the app's callbacks, the
+// types every other header uses, and running work from other threads.
+// Quitting is in WrenApp.h. This header includes the other headers, listed at
 // its end.
 //
 // Threads and timing:
@@ -30,9 +31,9 @@
 //   Chromium's call. WrenUI.h says what they may do.
 // - on_profile_extensions runs inside Chromium's call too, and may make no
 //   Wren calls.
-// - Closing, through Wren_CloseTab or Wren_CloseBrowsers, and Wren_Quit are
-//   requests. They take effect after the caller returns, and a page may
-//   cancel them.
+// - Closing, through Wren_CloseTab, Wren_CloseTabs or Wren_CloseBrowsers,
+//   and Wren_Quit are requests. They take effect after the caller returns, and
+//   a page may cancel them.
 // - Every other call takes effect before it returns. The matching on_changed
 //   record follows later.
 //
@@ -67,7 +68,7 @@ extern "C" {
 // WrenUnstableUI.h has its own version, WREN_UNSTABLE_UI_VERSION. Set
 // WrenStartup.api_version to this. Wren_Main refuses any other version. The
 // Compatibility guide has the details.
-#define WREN_API_VERSION 71
+#define WREN_API_VERSION 76
 
 typedef struct WrenProfile WrenProfile;
 typedef struct WrenBrowser WrenBrowser;
@@ -158,7 +159,8 @@ typedef enum WrenResult {
   // No bookmark or folder of the Profile has this ID. See WrenBookmarks.h.
   WREN_ERROR_BOOKMARK_UNAVAILABLE = 14,
   // A page cancelled the call with beforeunload, or the downloads warning
-  // did, so nothing was done. See Wren_CloseBrowsers and Wren_DeleteProfile.
+  // did, so nothing was done. See Wren_CloseBrowsers, Wren_CloseTabs and
+  // Wren_DeleteProfile.
   WREN_ERROR_CANCELLED = 15,
   // The tab's page gave no picture: it is discarded, crashed or of no size,
   // or drew nothing in time. See Wren_CaptureTab.
@@ -356,6 +358,21 @@ typedef enum WrenManifestV2 {
   WREN_MANIFEST_V2_ALL = 2,
 } WrenManifestV2;
 
+// The release channel Chromium reports, as Chrome reports its own. Chromium
+// opens some extension APIs, such as the processes permission, only on the
+// dev or canary channel, and some behaviour differs between channels.
+typedef enum WrenChannel {
+  // Chromium's own, which a build of Chromium reports. Chromium treats it as
+  // a developer's build, below canary, so every extension gets the APIs
+  // Chrome keeps to its dev and canary channels.
+  WREN_CHANNEL_UNKNOWN = 0,
+  // Chrome's channels.
+  WREN_CHANNEL_STABLE = 1,
+  WREN_CHANNEL_BETA = 2,
+  WREN_CHANNEL_DEV = 3,
+  WREN_CHANNEL_CANARY = 4,
+} WrenChannel;
+
 // How Chromium starts. Wren reads every field before Wren_Main hands control
 // to Chromium. It copies the strings and the icons.
 typedef struct WrenStartup {
@@ -470,6 +487,17 @@ typedef struct WrenStartup {
   // answer their ports (Wren_SetNativeHostHandler).
   const WrenNativeHost* native_hosts;
   size_t native_host_count;
+  // Optional. The channel Chromium reports, in every process. 0 is
+  // WREN_CHANNEL_UNKNOWN. A value outside WrenChannel ends Wren_Main with
+  // WREN_EXIT_INVALID_STARTUP.
+  WrenChannel channel;
+  // Optional. The app's own Google API key, which Chromium sends to Google's
+  // services in place of Chrome's. Safe Browsing's lists download only with a
+  // key. Get one from Google for the Safe Browsing API, under Google's terms.
+  // Chromium sends the key to its other Google services too. NULL sets none.
+  // A key is 1 to 256 letters, digits, "-" and "_". Any other ends Wren_Main
+  // with WREN_EXIT_INVALID_STARTUP.
+  const char* google_api_key;
 } WrenStartup;
 
 // --- Changes ----------------------------------------------------------------
@@ -615,8 +643,11 @@ typedef enum WrenTabField {
   // The session history changed, and with it whether the tab can go back or
   // forward.
   WREN_TAB_FIELD_HISTORY = 1u << 3,
-
+  // The favicon may have changed: Chromium found the page's icon, or a
+  // navigation committed, and the new page may have none. Read it again with
+  // Wren_CopyTabFaviconPNG.
   WREN_TAB_FIELD_FAVICON = 1u << 4,
+
   WREN_TAB_FIELD_PINNED = 1u << 5,
   WREN_TAB_FIELD_GROUP = 1u << 6,
   // Chromium discarded the page to save memory, or loaded it again after.
@@ -635,7 +666,7 @@ typedef enum WrenTabField {
   WREN_TAB_FIELD_SPLIT = 1u << 11,
   // What Chrome's status bubble would show for the tab changed, such as the
   // link under the pointer or the loading line. See WrenTabState.status and
-  // Wren_CopyTabStatusText.
+  // WREN_TAB_TEXT_STATUS.
   WREN_TAB_FIELD_STATUS = 1u << 12,
   // The tab's page went into a <wren-view> element of a web view's page, or
   // left it. See WrenTabState.in_element.
@@ -922,7 +953,7 @@ typedef struct WrenAppDelegate {
                             WrenBrowser* browser,
                             const WrenWindowRequest* request);
   // Chromium's About page asks for an update check: a page opened, or asked
-  // again. Never while the update state is WREN_UPDATE_NONE (WrenUpdates.h).
+  // again. Never while the update state is WREN_UPDATE_NONE (WrenApp.h).
   // The app decides whether to check, and tells the page what its updater
   // does with Wren_SetUpdateState. Runs from the event loop.
   void (*on_update_check)(void* context);
@@ -967,61 +998,6 @@ typedef enum WrenExit {
 WREN_API WrenExit Wren_Main(const WrenStartup* startup,
                             const WrenAppDelegate* delegate);
 
-// Asks the app to quit. A page may cancel the quit with beforeunload. With
-// downloads in progress, the user or the app may cancel it
-// (on_downloads_prompt). Otherwise on_quit_committed runs, every Browser gets
-// on_browser_closed, then on_will_quit runs, and Wren_Main returns
-// WREN_EXIT_NORMAL.
-//
-// It never warns, whether or not Warn Before Quitting is on: only the Quit
-// item's key does (on_quit_prompt). An app that wants the user to confirm
-// asks first, then calls this.
-WREN_API void Wren_Quit(void);
-
-// Warn Before Quitting, Chrome's setting. While it is on, the Quit item's key
-// warns before quitting (on_quit_prompt). It is on unless the user or policy
-// turned it off. Chrome's menu item and chrome://settings change it too, and
-// WREN_CHANGE_QUIT_WARNING reports every change.
-typedef struct WrenQuitWarningState {
-  // ⌘Q warns before quitting.
-  bool on;
-  // Policy sets it, and Wren_SetQuitWarning refuses to change it.
-  bool managed;
-} WrenQuitWarningState;
-
-// Fills `state`. Before on_ready and after quit, it is off.
-WREN_API void Wren_GetQuitWarningState(WrenQuitWarningState* state);
-
-// Turns Warn Before Quitting on or off for every Profile, and for later
-// launches. Returns WREN_ERROR_NOT_ALLOWED when policy sets it, as Chrome's
-// menu item is disabled then, or inside a callback that runs inside
-// Chromium's call.
-WREN_API WrenResult Wren_SetQuitWarning(bool on);
-
-// The ID of a quit prompt, unique for the life of the process.
-typedef uint64_t WrenQuitPromptID;
-
-// Chromium is about to warn before quitting (on_quit_prompt).
-struct WrenQuitPrompt {
-  WrenQuitPromptID prompt;
-  // The key was pressed again while this prompt, which the app answered
-  // WREN_POPOVER_APP, is open.
-  bool again;
-};
-
-// Answers a prompt for which the app answered WREN_POPOVER_APP. With `quit`,
-// the app quits, as Wren_Quit does, without a warning. Without it, the app
-// keeps running.
-//
-// One prompt is open at a time, and Wren never withdraws it. A quit from
-// elsewhere goes on while it is open. If a page's beforeunload cancels that
-// quit, the prompt is still open.
-//
-// Returns WREN_ERROR_POPOVER_CLOSED for a prompt already answered, or once the
-// app has quit, and WREN_ERROR_NOT_ALLOWED inside a callback that runs inside
-// Chromium's call.
-WREN_API WrenResult Wren_AnswerQuitPrompt(WrenQuitPromptID prompt, bool quit);
-
 // Returns the framework's WREN_API_VERSION. May be called at any time.
 WREN_API uint32_t Wren_GetAPIVersion(void);
 
@@ -1034,65 +1010,6 @@ typedef struct WrenVersionInfo {
 
 // Fills `info` with static strings. May be called at any time.
 WREN_API void Wren_GetVersionInfo(WrenVersionInfo* info);
-
-// --- The default browser ----------------------------------------------------
-//
-// Whether the app is the browser macOS opens web links with, and asking the
-// user to make it so, as Chrome's Settings do. The app is the default browser
-// when it opens http links. For macOS to offer it, its Info.plist declares the
-// http and https schemes and the HTML type (`wren bundle`'s `urlSchemes` and
-// `documentTypes`).
-
-typedef enum WrenDefaultBrowser {
-  // macOS did not say, or the app has no bundle ID.
-  WREN_DEFAULT_BROWSER_UNKNOWN = 0,
-  WREN_DEFAULT_BROWSER_NO = 1,
-  WREN_DEFAULT_BROWSER_YES = 2,
-} WrenDefaultBrowser;
-
-typedef struct WrenDefaultBrowserState {
-  WrenDefaultBrowser state;
-  // False where the DefaultBrowserSettingEnabled policy is off. Chrome's
-  // Settings disable their button then, and Wren_SetAsDefaultBrowser refuses.
-  bool can_set;
-} WrenDefaultBrowserState;
-
-// Receives the answer of Wren_GetDefaultBrowserState or
-// Wren_SetAsDefaultBrowser, from the event loop. `state` is NULL unless
-// `result` is WREN_OK, and borrowed until the callback returns.
-typedef void (*WrenDefaultBrowserCallback)(void* context,
-                                           const WrenDefaultBrowserState* state,
-                                           WrenResult result);
-
-// Asks macOS whether the app is the default browser, off the main thread, and
-// gives the answer to `callback` from the event loop. The call returns at once.
-// `callback` is required. It is not called before on_ready, or once the app
-// quits.
-//
-// From the first call, or the first Wren_SetAsDefaultBrowser, Wren asks again
-// each time the app becomes active, and reports WREN_CHANGE_DEFAULT_BROWSER
-// whenever an answer differs from the one before. Someone who changes the
-// default browser in System Settings leaves the app to do so. A change made
-// while the app stays active is seen the next time it becomes active.
-WREN_API void Wren_GetDefaultBrowserState(WrenDefaultBrowserCallback callback,
-                                          void* context);
-
-// Asks macOS to make the app the default browser, as Chrome's Settings do.
-// macOS asks the user, and `callback` gets the answer from the event loop
-// about when its prompt goes away: WREN_DEFAULT_BROWSER_YES if the user
-// accepted, else what the default browser is. The call returns at once.
-// `callback` is required. It is not called before on_ready, or once the app
-// quits. There is no time limit: the user may leave the prompt open.
-//
-// - While a prompt is open, another call does not ask macOS again. It gets
-//   the open prompt's answer.
-// - The app's windows stay where they are. macOS's prompt comes in front.
-//
-// `callback` gets WREN_ERROR_NOT_ALLOWED where the DefaultBrowserSettingEnabled
-// policy is off, or for a call made inside a callback that runs inside
-// Chromium's call.
-WREN_API void Wren_SetAsDefaultBrowser(WrenDefaultBrowserCallback callback,
-                                       void* context);
 
 // --- Work from other threads -------------------------------------------------
 //
@@ -1157,6 +1074,8 @@ WREN_API WrenResult Wren_PostToMainThreadAfter(int64_t delay_ms,
 // which has Chrome's sentences and the layout of its bubbles, and is
 // unstable.
 #include "WrenUI.h"
+// Prompts and toasts as data, for the app that draws its own.
+#include "WrenPrompts.h"
 // Chromium's omnibox as data.
 #include "WrenOmnibox.h"
 // A Profile's bookmarks as state.
@@ -1171,7 +1090,7 @@ WREN_API WrenResult Wren_PostToMainThreadAfter(int64_t delay_ms,
 #include "WrenMenus.h"
 // The system clipboard.
 #include "WrenClipboard.h"
-// The app's updates, and relaunching.
-#include "WrenUpdates.h"
+// Quitting, relaunching and updates, and the default browser.
+#include "WrenApp.h"
 
 #endif  // WREN_PUBLIC_WREN_H_

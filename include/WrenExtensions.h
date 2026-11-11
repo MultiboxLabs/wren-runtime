@@ -78,22 +78,25 @@ WREN_API WrenResult
 Wren_GetExtensionActionState(WrenBrowser* browser,
                              const char* extension_id,
                              WrenExtensionActionState* state);
-// The next three calls copy the extension's name, its tooltip and its badge
-// text, or "". The tooltip is the action's title and what the extension may
-// do on the page. Each string is UTF-8, and each call returns the length
-// needed, including the NUL.
-WREN_API size_t Wren_CopyExtensionActionName(WrenBrowser* browser,
+// Which of an extension action's strings Wren_CopyExtensionActionText
+// copies.
+typedef enum WrenExtensionActionText {
+  // The extension's name.
+  WREN_EXTENSION_ACTION_TEXT_NAME = 0,
+  // The action's title and what the extension may do on the page.
+  WREN_EXTENSION_ACTION_TEXT_TOOLTIP = 1,
+  // The badge's text.
+  WREN_EXTENSION_ACTION_TEXT_BADGE = 2,
+} WrenExtensionActionText;
+
+// Copies one of the action's strings, in UTF-8, or "". Returns the length
+// needed, including the NUL. A value outside WrenExtensionActionText copies
+// "".
+WREN_API size_t Wren_CopyExtensionActionText(WrenBrowser* browser,
                                              const char* extension_id,
+                                             WrenExtensionActionText text,
                                              char* buffer,
                                              size_t size);
-WREN_API size_t Wren_CopyExtensionActionTooltip(WrenBrowser* browser,
-                                                const char* extension_id,
-                                                char* buffer,
-                                                size_t size);
-WREN_API size_t Wren_CopyExtensionActionBadge(WrenBrowser* browser,
-                                              const char* extension_id,
-                                              char* buffer,
-                                              size_t size);
 // Copies the action's icon as a PNG, `points` square at `scale`. `points` is
 // 1 to 1024 and `scale` is at most 4.
 //

@@ -30,10 +30,39 @@ WREN_API WrenBrowser* Wren_GetTabBrowser(WrenTabID tab);
 // Returns the tab's index in its Browser, or -1.
 WREN_API int Wren_GetTabIndex(WrenTabID tab);
 
-// Each copies a UTF-8 string and returns the length needed, including the
-// NUL. A tab that is not available copies "".
-WREN_API size_t Wren_CopyTabTitle(WrenTabID tab, char* buffer, size_t size);
-WREN_API size_t Wren_CopyTabURL(WrenTabID tab, char* buffer, size_t size);
+// Which of a tab's strings Wren_CopyTabText copies.
+typedef enum WrenTabText {
+  // The page's title, and the URL the tab shows.
+  WREN_TAB_TEXT_TITLE = 0,
+  WREN_TAB_TEXT_URL = 1,
+  // The text of WrenTabState.status, or "" for none. A link's address is
+  // whole, formatted as Chrome shows it. Chrome's bubble shortens it to a
+  // third of the page's width. Once the pointer has rested on the link for
+  // 1.6 seconds, the bubble grows to fit the whole address.
+  WREN_TAB_TEXT_STATUS = 2,
+  // The tab's persistent ID (WrenSession.h). Compare the ID whole. Its form
+  // may change, so do not parse it. It never changes while the tab lives, so
+  // no change is reported. It can be read at any time, also from inside
+  // on_popover and the other callbacks inside Chromium's call.
+  WREN_TAB_TEXT_PERSISTENT_ID = 3,
+  // The texts of the tab's media (see "A tab's media"), or "" if it has
+  // none. The title is the page's title for its media, else the page's own
+  // title. The artist and the album are "" unless the page sets them.
+  WREN_TAB_TEXT_MEDIA_TITLE = 4,
+  WREN_TAB_TEXT_MEDIA_ARTIST = 5,
+  WREN_TAB_TEXT_MEDIA_ALBUM = 6,
+  // Where the media comes from, as Chrome's media controls show it: the
+  // site, such as "example.com", or an app's or extension's name.
+  WREN_TAB_TEXT_MEDIA_SOURCE = 7,
+} WrenTabText;
+
+// Copies one of the tab's strings, in UTF-8. Returns the length needed,
+// including the NUL. A tab that is not available copies "", and so does a
+// value outside WrenTabText.
+WREN_API size_t Wren_CopyTabText(WrenTabID tab,
+                                 WrenTabText text,
+                                 char* buffer,
+                                 size_t size);
 
 typedef struct WrenTabOptions {
   // Where to insert the tab. -1, or an index past the end, adds it at the end.
@@ -59,7 +88,39 @@ WREN_API WrenResult Wren_ActivateTab(WrenTabID tab);
 // Asks the tab to close. Its page may cancel the close with beforeunload
 // (WrenTabState.may_ask_before_close). When
 // a Browser's last tab closes, the Browser closes too (WrenBrowser.h).
+// Nothing reports whether the page kept the tab. Wren_CloseTabs does.
 WREN_API WrenResult Wren_CloseTab(WrenTabID tab);
+// Closes `count` tabs, all or none, in any Browsers. `callback` gets the
+// answer, from the event loop.
+//
+// Each tab's page may ask in beforeunload, one page at a time, in the order
+// given. Only once every page has agreed do the tabs close. Each page then
+// runs its pagehide and unload, and Reopen Closed Tab can bring each tab
+// back, as after Wren_CloseTab.
+//
+// - WREN_OK comes once every tab has left its Browser.
+// - WREN_ERROR_CANCELLED means a page kept them. Every tab stays open, none
+//   closed by the request, and each page asks again next time.
+//
+// A tab that closes by itself meanwhile counts as closed, and one that moves
+// to another Browser stays in the request. When a Browser's last tab closes,
+// the Browser closes too. A quit or a close of a tab's Browser that starts
+// while the request asks takes it over: `callback` gets
+// WREN_ERROR_CANCELLED, and that close asks the same pages.
+//
+// `callback` gets one of these errors without anything being done:
+//
+// - WREN_ERROR_INVALID_ARGUMENT for no tabs, NULL, or WREN_NO_TAB.
+// - WREN_ERROR_TAB_UNAVAILABLE if a tab is not open.
+// - WREN_ERROR_NOT_ALLOWED if a tab is in a request already, cannot be
+//   closed, or its Browser is in a Wren_CloseBrowsers request or closing,
+//   while a quit is under way, or inside on_popover.
+//
+// A tab named twice counts once.
+WREN_API void Wren_CloseTabs(const WrenTabID* tabs,
+                             size_t count,
+                             WrenResultCallback callback,
+                             void* context);
 // Loads `url` in the tab.
 WREN_API WrenResult Wren_Navigate(WrenTabID tab, const char* url);
 
@@ -301,16 +362,6 @@ typedef struct WrenTabState {
 
 WREN_API WrenResult Wren_GetTabState(WrenTabID tab, WrenTabState* state);
 
-// Copies the text of WrenTabState.status, or "" for none. Returns the length
-// needed, including the NUL.
-//
-// A link's address is whole, formatted as Chrome shows it. Chrome's bubble
-// shortens it to a third of the page's width. Once the pointer has rested on
-// the link for 1.6 seconds, the bubble grows to fit the whole address.
-WREN_API size_t Wren_CopyTabStatusText(WrenTabID tab,
-                                       char* buffer,
-                                       size_t size);
-
 // Copies the tab's favicon as a PNG into `buffer` if it fits, and returns the
 // PNG's size in bytes. Returns 0 if the tab has no favicon, or none yet. The
 // PNG is at the largest scale Chromium keeps, 2x on a Mac. Draw it at 16
@@ -425,30 +476,12 @@ WREN_API WrenResult Wren_SetTabIgnoresInput(WrenTabID tab, bool ignores);
 // --- A tab's media ----------------------------------------------------------
 //
 // What a tab plays, from Chromium's media session for the tab, as Chrome's
-// media controls in its toolbar show it: WrenTabState.media, these copies,
-// and calls that act on it. The app draws the controls. macOS's Now Playing,
-// the keyboard's media keys and the Picture in Picture window's buttons stay
-// Chromium's, and act on the same media, so every change reaches the app as
-// a WREN_TAB_FIELD_MEDIA or WREN_TAB_FIELD_MEDIA_METADATA record.
-
-// Which text Wren_CopyTabMediaText copies.
-typedef enum WrenMediaText {
-  // The page's title for its media, else the page's own title.
-  WREN_MEDIA_TEXT_TITLE = 0,
-  // "" unless the page sets them.
-  WREN_MEDIA_TEXT_ARTIST = 1,
-  WREN_MEDIA_TEXT_ALBUM = 2,
-  // Where the media comes from, as Chrome's media controls show it: the
-  // site, such as "example.com", or an app's or extension's name.
-  WREN_MEDIA_TEXT_SOURCE = 3,
-} WrenMediaText;
-
-// Copies one text of the tab's media, or "" if it has none. Returns the
-// length needed, including the NUL.
-WREN_API size_t Wren_CopyTabMediaText(WrenTabID tab,
-                                      WrenMediaText which,
-                                      char* buffer,
-                                      size_t size);
+// media controls in its toolbar show it: WrenTabState.media, the media kinds
+// of WrenTabText, the artwork, and calls that act on it. The app draws the
+// controls. macOS's Now Playing, the keyboard's media keys and the Picture in
+// Picture window's buttons stay Chromium's, and act on the same media, so
+// every change reaches the app as a WREN_TAB_FIELD_MEDIA or
+// WREN_TAB_FIELD_MEDIA_METADATA record.
 
 // Copies the artwork the page gives its media as a PNG into `buffer` if it
 // fits, and returns the PNG's size in bytes. Returns 0 if the page gives
@@ -547,7 +580,7 @@ WREN_API WrenResult Wren_SetTabWatchesNavigations(WrenTabID tab, bool watches);
 // - It stays out when it moves to another Browser, from a popup too, and when
 //   Chromium discards its page.
 // - Its history is kept, and its persistent ID's records
-//   (Wren_CopyTabPersistentID) are as for any tab.
+//   (WREN_TAB_TEXT_PERSISTENT_ID) are as for any tab.
 // - A tab in a group is also in Chrome's saved copy of that group, which
 //   brings the group's tabs back when the group is restored, this tab too.
 //   Keep such a tab out of groups.
@@ -620,7 +653,7 @@ WREN_API void Wren_MoveTabsToNewBrowser(const WrenTabID* tabs,
 //
 // The tab cannot keep its ID across kinds of Browser: it becomes a new tab,
 // with a new ID and a new view. `*moved_tab` receives the new ID. Its
-// persistent ID (Wren_CopyTabPersistentID) stays the same.
+// persistent ID (WREN_TAB_TEXT_PERSISTENT_ID) stays the same.
 //
 // - The tab's Browser must be WREN_BROWSER_POPUP or WREN_BROWSER_APP_POPUP.
 // - `options` as for Wren_MoveTabsToBrowser: the tab is never pinned, and
@@ -785,7 +818,9 @@ WREN_API WrenResult Wren_FocusTab(WrenTabID tab);
 //   user drags it.
 // - Focusing a side's page makes that side the active tab.
 // - Chromium keeps a split's tabs together. Closing one side ends the split.
-//   So does moving, grouping or pinning one side alone.
+//   So does moving, grouping or pinning one side alone. Wren_AddTabsToGroup
+//   and Wren_UngroupTabs given both sides keep the split, with its ID, layout
+//   and ratio.
 
 typedef enum WrenSplitLayout {
   // The first tab on the left, the second on the right.
@@ -844,6 +879,11 @@ WREN_API WrenResult Wren_SwapSplitTabs(WrenSplitID split);
 // joins a group it lands inside, keeps its own while a tab beside it is in
 // that group, and otherwise leaves it. A split that is its group's only tabs
 // keeps the group and moves it. Wren_GetTabIndex gives where its tabs end up.
+//
+// To choose the split's group at a group's edge, follow the move with
+// Wren_AddTabsToGroup or Wren_UngroupTabs, given both of its tabs. A split
+// just outside a group stays where it is when it joins that group, and a split
+// at either end of its group stays where it is when it leaves.
 WREN_API WrenResult Wren_MoveTabSplit(WrenSplitID split, int index);
 
 // --- DevTools ---------------------------------------------------------------

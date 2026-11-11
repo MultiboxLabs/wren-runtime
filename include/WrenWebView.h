@@ -91,8 +91,8 @@ typedef struct WrenWebViewOptions {
   // If true, a click in a drag area reaches the page, and only a press that
   // moves moves the window. Needs drags_window. See "Dragging the window".
   bool drag_area_clicks;
-  // If true, the view's pages may draw elements as Liquid Glass, with the CSS
-  // property -wren-glass. See "Liquid Glass".
+  // Experimental. If true, the view's pages may draw elements as Liquid Glass,
+  // with the CSS property -wren-glass. See "Liquid Glass".
   bool glass;
   // If true, the view's own pages read a trackpad scroll's phases, and hear
   // its fingers land and lift and its glide end. See "Scroll phases".
@@ -387,6 +387,11 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 
 // --- Liquid Glass -----------------------------------------------------------
 //
+// Experimental. Liquid Glass is the `glass` option, Wren_CanDrawGlass and the
+// CSS properties -wren-glass and -wren-glass-tint. Any release may change or
+// remove them, a minor release included. The release's breaking changes say
+// how to move.
+//
 // The pages of a view made with `glass` may draw an element as Liquid Glass,
 // the material of macOS 26's controls, which shows what lies behind it, blurred
 // and bent:
@@ -432,6 +437,22 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 // changes only how the page's own pixels draw. The properties do not exist in
 // a view made without `glass`, or in a tab, so a website cannot tell Wren from
 // Chrome by them there. Only the Mac draws glass.
+
+// Experimental. Whether this Mac can draw glass. It is true on macOS 26 or
+// later where Wren could copy glass from AppKit as Chromium started. Where it
+// is false, a view made with `glass` still has the properties, and its pages
+// draw the fallback, so decide by it whether to make views with `glass`.
+//
+// The answer is the device's, and does not change while the app runs, so no
+// change reports it. It leaves out what stops glass for a time, such as a
+// screen capture. A Mac without GPU compositing draws no glass either. Call it
+// on the main thread, after on_ready.
+//
+// A view made without `glass` draws its pages' backdrop-filters as Chrome
+// does, from the page's own pixels. One made with `glass` draws a blur and
+// colour filters with Core Animation where the call is false too, so in a
+// transparent page the blur still shows the window behind the view.
+WREN_API bool Wren_CanDrawGlass(void);
 
 // --- Scroll phases ----------------------------------------------------------
 //
@@ -518,16 +539,21 @@ WREN_API WrenResult Wren_SetPageCallHandler(WrenWebView* view,
                                             WrenPageCallHandler handler,
                                             void* context);
 
-// The next two calls copy the call's name, and its value as JSON text. The
-// value is "null" when the page gave none. Each returns the size needed,
-// including the NUL, and copies what fits. Each returns 0 for a call that is
-// over.
-WREN_API size_t Wren_CopyPageCallName(WrenPageCall* call,
+// Which of a call's strings Wren_CopyPageCallText copies.
+typedef enum WrenPageCallText {
+  // The call's name.
+  WREN_PAGE_CALL_TEXT_NAME = 0,
+  // The call's value as JSON text, "null" when the page gave none.
+  WREN_PAGE_CALL_TEXT_VALUE = 1,
+} WrenPageCallText;
+
+// Copies one of the call's strings, in UTF-8. Returns the size needed,
+// including the NUL, and copies what fits. Returns 0 for a call that is over.
+// A value outside WrenPageCallText copies "".
+WREN_API size_t Wren_CopyPageCallText(WrenPageCall* call,
+                                      WrenPageCallText text,
                                       char* buffer,
                                       size_t size);
-WREN_API size_t Wren_CopyPageCallValue(WrenPageCall* call,
-                                       char* buffer,
-                                       size_t size);
 
 // Answers the call. The page's promise resolves with the value of `json`.
 // NULL means null.
@@ -543,6 +569,10 @@ WREN_API WrenResult Wren_FailPageCall(WrenPageCall* call, const char* message);
 
 // Sends the page a message. The page's wren.on(name) listeners get the value
 // of `json`. NULL means null.
+//
+// The page gets messages, and the answers to its calls, in the order the app
+// sent them. While Chromium has the page frozen or paused, they wait, and
+// none of them runs the page's script until it runs again.
 //
 // Nothing is kept for a page that is not there. Returns WREN_ERROR_CLOSED
 // while the view has no page with the channel, because it is still loading,

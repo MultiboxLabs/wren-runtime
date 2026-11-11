@@ -1,67 +1,77 @@
-# Building an app on Wren
+# Wren Runtime guides
 
-Wren puts Chromium's browser layer in your app's process. Your app owns its windows and draws its UI. Chromium supplies the pages, and everything a browser keeps behind them. These guides are for writing such an app with a Wren release, on macOS on Apple silicon, in Swift, Rust or C.
+These guides take you from a first window to a browser you can ship, built on Wren Runtime with the Swift SDK, the Rust SDK or the C API. They also cover adding web pages to an app that isn't a browser.
 
-## Start here
+The examples are in Swift, and many show the same code in Rust. Each guide ends with a table of the names it uses in Swift, Rust and C.
 
-1. [Getting started](getting-started.md) makes a first app, from an empty folder to a window showing a page.
-2. [How a Wren app works](app-model.md) has the few ideas everything else rests on, and says what Wren is and is not. Read it before writing more than the first app.
+## New to Wren Runtime
 
-## Then, by what you are building
+Start with [Getting started](getting-started.md). It builds an app with one window showing a web page in a real Chromium tab, from three short files.
 
-### A browser
+Then read [How a Wren Runtime app works](app-model.md). It explains Profiles, Browsers, tabs and changes, which every other guide builds on. [Profiles and their data](profiles.md) goes further into Profiles: making them, clearing their data, and bringing data over from another browser.
 
-- [Windows and tabs](windows-and-tabs.md) covers placing tab views, dragging tabs, popups, DevTools, split tabs, side panels and full screen.
-- [The UI a browser provides](ui-checklist.md) lists every piece of browser UI, and says for each whether you reuse Chromium's or draw your own.
-- [A browser drawn in HTML](html-browser.md) is for a browser whose whole window is one web page, over a native host in Rust or Swift.
-- [Startup](startup.md) covers the data directory, the keychain, the main menu, and your name and icon in Chromium's own pages.
-- [Menus](menus.md) makes the main menu and context menus from a list of items, with Chromium's commands and the system's own among yours. It also shows how to ask before quitting.
-- [Extensions your app ships](extensions.md) installs extensions of your own in the Profiles you choose, on or off, where the user cannot remove them.
+## Building a browser
 
-### Web pages in an app that is not a browser
+| Guide | What it shows |
+| --- | --- |
+| [Windows and tabs](windows-and-tabs.md) | Showing tabs in your own windows under your own tab strip, with popups, DevTools, split tabs, side panels and full screen |
+| [Workspaces](workspaces.md) | One window that holds several complete browsers, such as workspaces for work and home, each with its own tabs and Profile |
+| [The browser's UI, piece by piece](ui-checklist.md) | Every piece of Chrome's UI, and whether you can reuse Chromium's or draw your own |
+| [A browser drawn in HTML](html-browser.md) | A browser whose whole window is one web page, over a small native host |
+| [Startup](startup.md) | Where your data lives, which main menu you get, and your name and logo in Chromium's own pages |
+| [Menus](menus.md) | The main menu and context menus, with Chrome's commands among yours, and a prompt before quitting |
+| [Extensions your app ships](extensions.md) | Extensions that come with your app, in the Profiles you choose |
 
-- [Adding web pages to an existing app](embedding.md) says what changes in your app, and which of Wren's two kinds of page to use.
-- [Web views](web-views.md) covers a page in your window that is not a tab, and its DevTools.
-- [Views in a web view](views-in-web-views.md) covers a web view's page that shows tabs, with their DevTools, and side panels inside itself.
-- [Messages between a page and your app](messages.md) covers a web view's page calling your code, and hearing from it.
-- [Anchors in a web view](anchors-in-web-views.md) hangs Chromium's bubbles off the buttons of a toolbar drawn in a page, extensions' buttons among them.
-- [Your own URL schemes](schemes.md) serves your pages from your app's code and resources.
+## Adding web pages to an app
 
-### Shipping it
+| Guide | What it shows |
+| --- | --- |
+| [Web pages in an existing app](embedding.md) | What changes in your app, and which kind of page to use |
+| [Web views](web-views.md) | A page in your window that isn't a tab, such as a panel or a whole window of UI |
+| [Messages between a page and your app](messages.md) | A web view's page calling your code, and your code telling the page what changed |
+| [Views in a web view](views-in-web-views.md) | Tabs and side panels shown inside a web view's page |
+| [Anchors in a web view](anchors-in-web-views.md) | Chromium's bubbles opening from buttons your page draws |
+| [Your own URL schemes](schemes.md) | Pages served from your app's code and resources, at addresses such as `app://settings` |
 
-- [The `wren` command](wren-cli.md) bundles an app, signs it, and has Apple notarise it.
-- [Updating your app with Sparkle](updates.md) adds Sparkle, shows its progress on Chromium's About page, and relaunches into the update.
-- [Getting started](getting-started.md#before-you-ship) lists what a shipped app sets so Chromium's UI shows its name and not Chromium's.
+## Shipping
+
+| Guide | What it shows |
+| --- | --- |
+| [The `wren` command](wren-cli.md) | Bundling your executable into an app, signing it, and notarising it |
+| [Updating your app with Sparkle](updates.md) | Updates through Sparkle, with their progress on Chromium's About page |
+| [Before you ship](getting-started.md#before-you-ship) | What to set so Chromium's pages show your app's name instead of Chromium's |
 
 ## Reference
 
-- [The C API](c-api.md) explains the conventions of the headers, for C, Objective-C, or a binding to another language.
-- [Compatibility](compatibility.md) says what may change between releases, and which framework an app runs with.
-- [This release](this-release.md) gives its version and its Chromium, and says what it does not do yet and its known issues.
+- [The C API](c-api.md) explains how the headers work, for apps in C or Objective-C, and for wrapping Wren Runtime in another language.
+- [Compatibility](compatibility.md) says what can change between releases, and how to move your app across each breaking change.
+- [This release](this-release.md) has the release notes: what's new, what breaks, what's fixed, and the known issues.
+- [What Wren Runtime can't do yet](limitations.md) lists the parts of Chrome that aren't available yet.
 
-The headers say what each function does. A release has them in its `include` folder.
+The headers document every function in full. A release has them in its `include` folder.
 
-| Header | What is in it |
+| Header | What's in it |
 | --- | --- |
-| [`Wren.h`](../include/Wren.h) | What Wren is, startup, changes, the app's callbacks |
-| [`WrenBrowser.h`](../include/WrenBrowser.h) | Profiles, Browsers, full screen, side panels |
-| [`WrenTabs.h`](../include/WrenTabs.h) | Tabs, groups, splits, DevTools |
-| [`WrenExtensions.h`](../include/WrenExtensions.h) | Extensions' actions, the installed extensions, and the app's own |
-| [`WrenToolbar.h`](../include/WrenToolbar.h) | Anchors, page actions, content setting icons |
-| [`WrenDownloads.h`](../include/WrenDownloads.h) | Downloads, the download button, the prompts before closing or quitting |
-| [`WrenUI.h`](../include/WrenUI.h) | Popovers, and the facts behind them |
-| [`WrenUnstableUI.h`](../include/WrenUnstableUI.h) | Chrome's sentences and the layout of its bubbles, which are unstable |
+| [`Wren.h`](../include/Wren.h) | Starting Wren Runtime, your app's callbacks, changes, and work from other threads |
+| [`WrenBrowser.h`](../include/WrenBrowser.h) | Profiles, Browsers, full screen and side panels |
+| [`WrenTabs.h`](../include/WrenTabs.h) | Tabs, groups, splits and DevTools |
+| [`WrenExtensions.h`](../include/WrenExtensions.h) | Extensions' buttons, the installed extensions, and your app's own |
+| [`WrenToolbar.h`](../include/WrenToolbar.h) | Where bubbles open from, page actions and site setting icons |
+| [`WrenDownloads.h`](../include/WrenDownloads.h) | Downloads, the download button, and the prompts before closing or quitting |
+| [`WrenUI.h`](../include/WrenUI.h) | Chromium's popovers, and the state behind them |
+| [`WrenUnstableUI.h`](../include/WrenUnstableUI.h) | Chrome's own sentences and bubble layouts, which can change in any release |
+| [`WrenPrompts.h`](../include/WrenPrompts.h) | Chromium's prompts and toasts as data, and your app's own toasts |
 | [`WrenOmnibox.h`](../include/WrenOmnibox.h) | The address field and its suggestions |
 | [`WrenBookmarks.h`](../include/WrenBookmarks.h) | A Profile's bookmarks |
-| [`WrenSession.h`](../include/WrenSession.h) | Restoring sessions, and closed tabs |
-| [`WrenSchemes.h`](../include/WrenSchemes.h) | The app's own URL schemes |
+| [`WrenSession.h`](../include/WrenSession.h) | Restoring the last session, and closed tabs |
+| [`WrenSchemes.h`](../include/WrenSchemes.h) | Your own URL schemes |
 | [`WrenWebView.h`](../include/WrenWebView.h) | Web views, and messages with their pages |
 | [`WrenMenus.h`](../include/WrenMenus.h) | The main menu and context menus |
-| [`WrenClipboard.h`](../include/WrenClipboard.h) | The system clipboard: text and URLs |
-| [`WrenUpdates.h`](../include/WrenUpdates.h) | The app's updates in Chromium's About page, and relaunching |
+| [`WrenClipboard.h`](../include/WrenClipboard.h) | Text and URLs on the system clipboard |
+| [`WrenApp.h`](../include/WrenApp.h) | Quitting and its warning, relaunching, your app's updates on Chromium's About page, and being the default browser |
 
-The Swift API, in a release's `wren-swift` package under `Sources/Wren`, has every function of the C API under a Swift name. The Rust crate `wren`, in a release's `wren-rust` folder, has every function under the Swift name in Rust's case. In both, each item's comment says what it does and names its C function. So a search for a C name in either finds its wrapper, and a search for a Swift or Rust name finds its C name.
+The Swift SDK and the Rust SDK cover every function in the headers. Each Swift and Rust item's comment names the C function it wraps, so a search for either name finds the other.
 
-## What to expect
+## Before you start
 
-Wren is before 1.0. An app must be bundled with the release it was compiled against. The framework refuses any other API version, and nothing yet promises that an app built for one release runs on the next. [This release](this-release.md) lists what is missing, infobars among them, and the known issues.
+Wren Runtime isn't at 1.0 yet. Your app runs only with the release it was built against, and a new release can change the API. [Compatibility](compatibility.md) lists every change that needs work in your app.

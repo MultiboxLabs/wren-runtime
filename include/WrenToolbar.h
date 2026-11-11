@@ -182,7 +182,7 @@ typedef struct WrenPageActionState {
   // True if Chrome shows the icon now.
   bool visible;
   // True if Chrome shows the icon with its label beside it, as a chip. See
-  // Wren_CopyPageActionLabel.
+  // WREN_PAGE_ACTION_TEXT_LABEL.
   bool chip;
   // True if the icon's bubble is open, or for find, the find bar. Draw the
   // icon pressed meanwhile, as Chrome highlights it.
@@ -194,17 +194,21 @@ typedef struct WrenPageActionState {
 WREN_API WrenResult Wren_GetPageActionState(WrenBrowser* browser,
                                             WrenPageAction action,
                                             WrenPageActionState* state);
-// The next two calls copy the label Chrome shows beside the icon as a chip,
-// and the icon's tooltip, or "". Each string is UTF-8, and each call returns
-// the length needed, including the NUL.
-WREN_API size_t Wren_CopyPageActionLabel(WrenBrowser* browser,
-                                         WrenPageAction action,
-                                         char* buffer,
-                                         size_t size);
-WREN_API size_t Wren_CopyPageActionTooltip(WrenBrowser* browser,
-                                           WrenPageAction action,
-                                           char* buffer,
-                                           size_t size);
+// Which of a page action's strings Wren_CopyPageActionText copies.
+typedef enum WrenPageActionText {
+  // The label Chrome shows beside the icon as a chip.
+  WREN_PAGE_ACTION_TEXT_LABEL = 0,
+  // The icon's tooltip.
+  WREN_PAGE_ACTION_TEXT_TOOLTIP = 1,
+} WrenPageActionText;
+
+// Copies one of the action's strings, in UTF-8, or "". Returns the length
+// needed, including the NUL. A value outside WrenPageActionText copies "".
+WREN_API size_t Wren_CopyPageActionText(WrenBrowser* browser,
+                                        WrenPageAction action,
+                                        WrenPageActionText text,
+                                        char* buffer,
+                                        size_t size);
 // Copies the icon as a PNG, `points` square at `scale`. `points` is 1 to 1024
 // and `scale` is at most 4. The icon is drawn as Chrome draws it now, such as
 // the star filled once the page is bookmarked, in Chromium's icon colour for

@@ -1,37 +1,44 @@
 # Getting started
 
-This page makes a first Wren app. It is one window that shows a web page in a real Chromium tab. It takes three files and four commands in Swift. The same app in Rust is [at the end](#the-same-app-in-rust).
+By the end of this page you'll have a Mac app that opens a window on a web page. The page runs in a real Chromium tab, so links, typing, context menus and permission prompts all work as they do in Chrome. In Swift it takes three files and four commands, and the same app in Rust is [further down](#the-same-app-in-rust). You won't compile Chromium at any point, because each Wren Runtime release comes with it already built.
 
 ## What you need
 
 - A Mac with Apple silicon.
-- Xcode or the Command Line Tools, for `swift build` and `codesign`.
-- For Rust, also Rust 1.85 or later, from rustup or Homebrew.
-- The `wren` command, installed once. Releases are published in the public repository `MultiboxLabs/wren-runtime`, whose install script puts `wren` in `~/.local/bin`:
+- Xcode or the Command Line Tools.
+- Rust 1.85 or later, if you're writing the app in Rust.
+- The `wren` command. Install it once:
 
   ```sh
   curl -fsSL https://wrenbrowser.com/runtime/cli/install.sh | sh
   ```
 
-  It checks `wren` against the release's `SHA256SUMS`, and says if `~/.local/bin` is not on your `PATH`.
+  [The `wren` command](wren-cli.md#installing-wren) has the details, including how to install another release or into another folder.
 
-A project names the Wren release it is built with. `wren install` fetches that release, once per Mac, and links it into the project as `.wren/runtime`. The project's build files point there. So they are the same on every Mac, and the app is built and bundled with the same release.
+## 1. Describe the app
 
-The release holds everything an app needs. You never build Chromium to write an app. The app runs on macOS 13 or later, on Apple silicon.
+Make a folder for the project, and put a `wren-app.json` in it. It gives your app's name and bundle ID, and the Wren Runtime release it's built with:
 
-| In a release (`.wren/runtime`) | What it is |
-| --- | --- |
-| `Wren Framework.framework` | Chromium with Wren in it. `wren bundle` copies it into your app. |
-| `wren-swift` | The Swift package: `Wren`, the Swift API, and `CWren`, the C API under it. |
-| `wren-rust` | The Rust crate `wren`: the API for Rust, and `wren::sys`, the C API under it. |
-| `include` | The C headers, with a module map. |
-| `bin/wren` | The command that turns an executable into an app. |
-| `docs` | These guides. |
-| `app-template`, `LICENSES`, `release.json` | What `wren` starts each app from, the licences to ship, and which build this is. |
+```json
+{
+  "name": "MyBrowser",
+  "displayName": "My Browser",
+  "bundleId": "com.example.mybrowser",
+  "wren": "0.5.0"
+}
+```
 
-## 1. The package
+Then fetch that release:
 
-`Package.swift`:
+```sh
+wren install
+```
+
+The first time, `wren install` downloads the release. After that, every project on this Mac that names it shares one copy. The project gets a link to it at `.wren/runtime`, and your build files point there, so the project builds the same way on any Mac. The `.wren` folder keeps itself out of git.
+
+## 2. Add the Swift SDK
+
+Put this in `Package.swift`. It depends on the Swift SDK that came with the release:
 
 ```swift
 // swift-tools-version: 5.9
@@ -50,9 +57,9 @@ let package = Package(
 )
 ```
 
-## 2. The program
+## 3. Write the program
 
-`Sources/MyBrowser/main.swift`:
+Put this in `Sources/MyBrowser/main.swift`:
 
 ```swift
 import AppKit
@@ -65,7 +72,7 @@ var window: NSWindow?
 // Closing the window asks the Browser to close; the app quits once it has.
 final class WindowDelegate: NSObject, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        try? browser?.close()
+        browser?.close { _ in }
         return false
     }
 }
@@ -102,7 +109,7 @@ func show(_ created: Browser) {
 
 // Required: Chromium opened a Browser of its own (a popup, DevTools). This
 // app shows one window, so it closes them, and undocked DevTools with them.
-var delegate = AppDelegate(browserOpened: { opened, _, _ in try? opened.close() })
+var delegate = AppDelegate(browserOpened: { opened, _, _ in opened.close { _ in } })
 delegate.ready = {
     WrenApp.openProfile { result in
         guard case .success(let opened) = result else { return WrenApp.quit() }
@@ -135,67 +142,36 @@ profile = nil
 exit(status == .normal ? 0 : Int32(status.rawValue))
 ```
 
-Here is what it does, in the order it runs.
+Here's what happens when it runs.
 
-1. `WrenApp.run` starts Chromium in this process and runs the app's event loop. It takes the place of `NSApplicationMain`, and returns only when the app quits. `Startup` says where Chromium keeps its data. `.mock` keeps the key that encrypts cookies and passwords in memory, which suits development. A shipped app uses the Keychain instead. See [Startup](startup.md).
-2. `ready` runs once Chromium is up. Nearly every call must wait for it.
-3. A Profile is one user's data, such as history, cookies and extensions. `openProfile` with no ID opens the Profile Chromium starts with.
-4. A Browser is a set of tabs, which Chrome shows as one window. Wren gives it no window. You make one, and `attach` tells Chromium which of its views holds the tabs.
-5. Each tab has a view, an ordinary `NSView`. A page shows while its view is in a window, at the view's size.
-6. `changed` reports what Chromium did. Here that is two things. The tabs or the active tab changed, for example because a link opened a new tab. Or a tab has a new title.
+`WrenApp.run` starts Chromium inside your app's process, and runs the event loop until the app quits. It takes the place of `NSApplicationMain`. `Startup` tells Chromium where to keep its data. With `.mock`, the key that encrypts cookies and saved passwords stays in memory, which is what you want while you develop. [Startup](startup.md) covers what a shipped app sets instead.
 
-The names this program uses, in Swift, in Rust and in C:
+Once Chromium is running, it calls `ready`. The app opens a Profile there, which holds one person's history, cookies and extensions, and creates a Browser in it. A Browser is a set of tabs, which Chrome would show as one window.
 
-| Swift | Rust | C |
-| --- | --- | --- |
-| `WrenApp.run` | `wren::run` | `Wren_Main` |
-| `Startup` | `Startup::new` | `WrenStartup` |
-| `AppDelegate.ready` | `App::ready` | `on_ready` |
-| `WrenApp.openProfile` | `MainThread::open_profile` | `Wren_OpenProfile` |
-| `profile.createBrowser` | `Profile::create_browser` | `Wren_CreateBrowser` |
-| `browser.attach(to:)` | `Browser::attach_to_view` | `Wren_AttachBrowserToView` |
-| `browser.activeTab` | `Browser::active_tab` | `Wren_GetActiveTab` |
-| `tab.view` | `BrowserTab::view` | `Wren_GetTabView` |
-| `tab.focus()` | `BrowserTab::focus` | `Wren_FocusTab` |
-| `AppDelegate.changed` | `App::changed` | `on_changed` |
-| `AppDelegate.browserClosed` | `App::browser_closed` | `on_browser_closed` |
-| `browser.close` | `Browser::close` | `Wren_CloseBrowsers` |
-| `WrenApp.quit` | `MainThread::quit` | `Wren_Quit` |
+Wren Runtime doesn't give the Browser a window, so the program makes one. `attach` tells Chromium which view holds the Browser's tabs, so its dialogs and prompts appear over that view. Each tab has an ordinary `NSView`, and its page shows while the view is in a window.
 
-The C headers in `include` describe each one fully. Each Swift and Rust item's comment names its C side.
+When something changes, Chromium calls `changed`. This app listens for two kinds of change: a new active tab, such as when a link opens in a new tab, and a new title.
 
-## 3. The manifest
+Chromium can also open Browsers of its own, for a popup or for DevTools in a window of its own. Every app handles `browserOpened`, and this one closes them, because it only shows one window. [Windows and tabs](windows-and-tabs.md#windows-chromium-opens) shows how to give them windows instead.
 
-`wren-app.json` says what the app is called, and which Wren release it is built with:
-
-```json
-{
-  "name": "MyBrowser",
-  "displayName": "My Browser",
-  "bundleId": "com.example.mybrowser",
-  "wren": "0.4.0"
-}
-```
-
-## Build, bundle, run
+## 4. Build and run
 
 ```sh
-wren install
 swift build -c release
 wren bundle --incremental --executable .build/release/MyBrowser \
   --manifest wren-app.json --output MyBrowser.app
 open MyBrowser.app
 ```
 
-`wren install` puts release 0.4.0 on this Mac, fetching it only the first time, and links `.wren/runtime` to it. The `.wren` folder keeps itself out of git. Run `wren install` again after changing `"wren"`.
+`swift build` makes an executable, but that executable can't start on its own. It loads Chromium from the app bundle around it, and `wren bundle` makes that bundle. The bundle holds Chromium, its helper apps under your app's name, and an ad hoc signature that this Mac accepts.
 
-`swift build` makes only an executable, and that executable does not start on its own. It loads the framework from the app bundle it is in. `wren bundle` makes the bundle. The bundle has the framework, Chromium's helper apps under your app's name, and an ad hoc signature that this Mac accepts. Run `wren bundle` again after every build. With `--incremental`, it keeps the bundle when only the executable changed and signs only the app, in under half a second. The app also starts sooner, because macOS scans a bundle only the first time it starts. See [While you develop](wren-cli.md#while-you-develop).
+Run `wren bundle` after every build. With `--incremental`, it updates only the executable and the signature when nothing else changed, which takes under half a second. [While you develop](wren-cli.md#while-you-develop) has more.
 
-A window opens on example.com. Links, typing, context menus, text selection and permission prompts all work, because the view is Chromium's own. ⌘Q quits, after Chrome's "Hold ⌘Q to Quit", because Wren installs a standard main menu unless you ask for another. See [Startup](startup.md).
+A window opens on example.com. ⌘Q quits, after Chrome's "Hold ⌘Q to Quit", because Wren Runtime gives your app a standard main menu until you set your own.
 
 ## The same app in Rust
 
-The `wren` crate in the release's `wren-rust` folder is the same API for Rust. Its names are the Swift names in Rust's case: `active_tab` for `activeTab`. Each item's comment in the crate names the C function it calls, so a search for a Rust name leads to the header.
+The Rust SDK is the crate `wren`, in the release's `wren-rust` folder. Its names are the Swift SDK's in Rust's case, such as `active_tab` for `activeTab`.
 
 Use the same `wren-app.json`, and this `Cargo.toml`:
 
@@ -212,7 +188,7 @@ objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
 ```
 
-`src/main.rs`:
+Put this in `src/main.rs`:
 
 ```rust
 use std::cell::RefCell;
@@ -230,7 +206,7 @@ use wren::{
     Startup, TabFields,
 };
 
-// What the app holds, shared with the closures it hands Wren.
+// What the app holds, shared with the closures it hands Wren Runtime.
 #[derive(Default)]
 struct State {
     browser: RefCell<Option<Browser>>,
@@ -307,7 +283,7 @@ impl App for MyBrowser {
     // This app shows one window, so it closes them, and undocked DevTools
     // with them.
     fn browser_opened(&self, _: MainThread, opened: Browser, _: BrowserType, _: Option<Browser>) {
-        let _ = opened.close();
+        opened.close(|_| {});
     }
 
     fn changed(&self, _: MainThread, changes: &[Change]) {
@@ -350,14 +326,14 @@ fn main() {
 }
 ```
 
-It differs from the Swift program where Rust differs.
+The program follows the Swift one step by step. Where it differs, it's because Rust does.
 
-- The callbacks are the methods of an `App`, which `wren::run` takes. They get `&self`, because a callback can run inside another. Keep state in `RefCell`s and borrow it briefly.
-- Each callback gets a `MainThread`. The calls that take no handle need it, such as `open_profile` and `quit`. Handles and IDs stay on the main thread.
-- A tab's view is a `NativeView`, a pointer to an `NSView`. objc2 turns it into an `NSView`.
-- Closing this window only hides it, and ⌘Q quits. To make closing ask the Browser to close, as the Swift program does, give the window a delegate with objc2's `define_class!`.
+- The callbacks are the methods of a type that implements `App`, which `wren::run` takes. They get `&self`, because one callback can run while another is still running. So the state lives in `RefCell`s, and each callback borrows it only briefly.
+- Each callback gets a `MainThread`, which the calls that don't belong to a Profile or a Browser need, such as `open_profile` and `quit`. It also keeps Wren Runtime's values on the main thread, where they belong.
+- A tab's view comes as a `NativeView`, which objc2 turns into an `NSView`.
+- Closing this window only hides it, and ⌘Q quits. To make closing the window close the Browser, as the Swift program does, give the window a delegate with objc2's `define_class!`.
 
-Build and bundle as before, with Cargo:
+Build it with Cargo, and bundle it the same way:
 
 ```sh
 wren install
@@ -367,56 +343,74 @@ wren bundle --executable target/release/my-browser \
 open MyBrowser.app
 ```
 
-The crate links the framework beside it, through `.wren/runtime`. To use another release, set `WREN_RELEASE_DIR` to its folder.
+The crate finds Chromium through `.wren/runtime`. To build against another release, set `WREN_RELEASE_DIR` to its folder.
 
-## A release downloaded by hand
+## If it doesn't start
 
-You can also fetch a release with `curl`, check it, unpack it where you keep it, and link it into the project as `wren install` would:
-
-```sh
-curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.4.0/wren-runtime-0.4.0-mac-arm64.zip
-curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.4.0/SHA256SUMS
-shasum -a 256 --ignore-missing -c SHA256SUMS
-ditto -x -k wren-runtime-0.4.0-mac-arm64.zip ~/wren-runtimes
-# In the project's folder:
-mkdir -p .wren && ln -s ~/wren-runtimes/wren-runtime-0.4.0-mac-arm64 .wren/runtime
-echo '*' > .wren/.gitignore
-```
-
-Use `curl` or `gh` rather than a web browser. macOS marks what a web browser downloads as quarantined, and then refuses to run `bin/wren` from it.
+- **The app quits at once.** Run its executable from a terminal to see why, as `MyBrowser.app/Contents/MacOS/MyBrowser`. If a `Startup` value is wrong, Wren Runtime prints which one.
+- **`WrenApp.run` returns `.apiMismatch`.** The app was built against one release and bundled with another. Build and bundle with the same one.
+- **It returns `.alreadyRunning`.** Another copy of the app is using the same data folder. Only one process at a time can use it.
+- **The window is empty where the page should be.** The tab's view isn't in the window, it or a view around it is hidden, or it has no size.
+- **DevTools or a popup flashes and disappears.** Each one is a Browser of its own, and the `browserOpened` above closes them all. [Windows and tabs](windows-and-tabs.md#windows-chromium-opens) shows how to give them windows.
 
 ## Tell your coding agent
 
-The release has an `AGENTS.md` for coding agents. It says what Wren is, where to look things up, and the facts agents most often get wrong. An agent finds it only if the project points there. `.wren` is ignored by git, so search tools that respect `.gitignore` skip it.
-
-Add this to the project's own `AGENTS.md`, or `CLAUDE.md`:
+Each release comes with an `AGENTS.md` for coding agents. It says what Wren Runtime is, where to look things up, and what agents most often get wrong. An agent won't find it by itself, because git ignores `.wren`, and so do search tools that follow `.gitignore`. Add this to your project's own `AGENTS.md` or `CLAUDE.md`:
 
 ```markdown
-## Wren
+## Wren Runtime
 
-This app is built with Wren, linked at `.wren/runtime`. Before working with Wren, read `.wren/runtime/AGENTS.md`. The headers in `.wren/runtime/include` are the reference. Search `.wren/runtime` by its path, because git ignores it.
+This app is built with Wren Runtime, linked at `.wren/runtime`. Before working with Wren Runtime, read `.wren/runtime/AGENTS.md`. The headers in `.wren/runtime/include` are the reference. Search `.wren/runtime` by its path, because git ignores it.
 ```
 
-## When it does not start
+## Fetching a release by hand
 
-- **The app exits at once.** Run its executable from a terminal to see why, as `MyBrowser.app/Contents/MacOS/MyBrowser`. An invalid `Startup` prints its reason.
-- **`WrenApp.run` returns `.apiMismatch`.** In Rust it is `ExitStatus::ApiMismatch`. The app was compiled against one release and bundled with another. Build and bundle with the same one.
-- **It returns `.alreadyRunning`.** Another copy of the app is using the same data directory. Only one process at a time can use a directory.
-- **Nothing shows where the page should be.** The tab's view is not in a window, or it or an ancestor is hidden, or it has no size.
-- **DevTools or a popup opens and is gone at once.** Each is a Browser of its own, and `browserOpened` above closes every one. Show it in a window instead. See [Windows and tabs](windows-and-tabs.md#windows-chromium-opens).
+If you'd rather not use `wren install`, download a release, check it, unpack it wherever you keep releases, and link it into the project yourself:
+
+```sh
+curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.5.0/wren-runtime-0.5.0-mac-arm64.zip
+curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.5.0/SHA256SUMS
+shasum -a 256 --ignore-missing -c SHA256SUMS
+ditto -x -k wren-runtime-0.5.0-mac-arm64.zip ~/wren-runtimes
+# In the project's folder:
+mkdir -p .wren && ln -s ~/wren-runtimes/wren-runtime-0.5.0-mac-arm64 .wren/runtime
+echo '*' > .wren/.gitignore
+```
+
+Download it with `curl` or `gh`, not a web browser. macOS quarantines what a web browser downloads, and then won't run the release's `bin/wren`.
 
 ## Before you ship
 
-The first app leaves Chromium's own name and settings in place. A shipped app sets these, all described in [Startup](startup.md).
+This first app still shows Chromium's name and logo in Chromium's own pages, and keeps its key in memory. [Startup](startup.md) describes each of these settings.
 
-- **The name.** Set `productName`, or Chromium's own UI says "Chromium" in its toasts, Settings, dialogs and prompts.
-- **The logo.** Set `productIconPNG`, and the dark and SVG variants if you have them, or Chromium's logo shows in Settings and dialogs.
-- **The keychain.** Use `.system` with a `keychainName` that never changes. `.mock` is for development only, and data written with it cannot be read with the system key later.
-- **About.** Set `copyright`, `companyName`, `helpURL` and `appVersion` for Settings > About and chrome://version.
-- **The bundle.** Give `wren-app.json` an `icon`, a `version` and a `copyright`, and sign and notarise with `wren bundle` and `wren notarize`. See [The `wren` command](wren-cli.md).
+- **Your name.** Set `productName`, so toasts, Settings, dialogs and prompts say your app's name instead of "Chromium".
+- **Your logo.** Set `productIconPNG`, and the dark and SVG versions if you have them, so Settings and dialogs show your logo instead of Chromium's.
+- **The keychain.** Use `.system` with a `keychainName` that never changes. Data written with `.mock` can't be read with the system key later.
+- **About.** Set `copyright`, `companyName`, `helpURL` and `appVersion`, which Settings › About and `chrome://version` show.
+- **The bundle.** Give `wren-app.json` an `icon`, a `version` and a `copyright`, then sign with `wren bundle` and notarise with `wren notarize`. [The `wren` command](wren-cli.md) shows how.
 
 ## Next
 
-- [How a Wren app works](app-model.md) explains Profiles, Browsers, tabs and changes properly.
-- [Windows and tabs](windows-and-tabs.md) turns this app into a browser, with a tab strip, popups in windows of their own, and DevTools.
-- [Adding web pages to an existing app](embedding.md) is for an app that is not a browser.
+- [How a Wren Runtime app works](app-model.md) explains Profiles, Browsers, tabs and changes in full.
+- [Windows and tabs](windows-and-tabs.md) turns this app into a browser, with a tab strip, popups in their own windows, and DevTools.
+- [Web pages in an existing app](embedding.md) is for an app that isn't a browser.
+
+## The names in Swift, Rust and C
+
+| Swift | Rust | C |
+| --- | --- | --- |
+| `WrenApp.run` | `wren::run` | `Wren_Main` |
+| `Startup` | `Startup::new` | `WrenStartup` |
+| `AppDelegate.ready` | `App::ready` | `on_ready` |
+| `WrenApp.openProfile` | `MainThread::open_profile` | `Wren_OpenProfile` |
+| `profile.createBrowser` | `Profile::create_browser` | `Wren_CreateBrowser` |
+| `browser.attach(to:)` | `Browser::attach_to_view` | `Wren_AttachBrowserToView` |
+| `browser.activeTab` | `Browser::active_tab` | `Wren_GetActiveTab` |
+| `tab.view` | `BrowserTab::view` | `Wren_GetTabView` |
+| `tab.focus()` | `BrowserTab::focus` | `Wren_FocusTab` |
+| `AppDelegate.changed` | `App::changed` | `on_changed` |
+| `AppDelegate.browserOpened` | `App::browser_opened` | `on_browser_opened` |
+| `AppDelegate.browserClosed` | `App::browser_closed` | `on_browser_closed` |
+| `browser.close` | `Browser::close` | `Wren_CloseBrowsers` |
+| `WrenApp.quit` | `MainThread::quit` | `Wren_Quit` |
+| `.apiMismatch`, `.alreadyRunning` | `ExitStatus::ApiMismatch`, `ExitStatus::AlreadyRunning` | `WREN_EXIT_API_MISMATCH`, `WREN_EXIT_ALREADY_RUNNING` |

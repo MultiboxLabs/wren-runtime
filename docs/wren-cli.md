@@ -1,6 +1,6 @@
 # The `wren` command
 
-`wren` is the tool an app developer runs to get the Wren release an app is built with. It also turns the compiled executable into an app that carries Wren. It is one executable that needs nothing else installed. Each release ships it as `bin/wren`, and publishes it on its own as `wren`.
+`wren` gets the Wren Runtime release your app is built with, and turns your compiled executable into a Mac app with Chromium inside it, signed and ready to notarise. It's a single executable with nothing else to install. Each release comes with it as `bin/wren`, and any release's `wren` works with the others.
 
 ```text
 wren --version
@@ -13,79 +13,83 @@ wren extension-id PATH
 wren help
 ```
 
-It is the only command a release ships. Wren's own build tools are not part of it.
+This page is the reference for each command. [Getting started](getting-started.md) shows them in use with a first app.
 
 ## Installing `wren`
-
-Releases are published in the public repository `MultiboxLabs/wren-runtime`. Its install script puts `wren` in `~/.local/bin`:
 
 ```sh
 curl -fsSL https://wrenbrowser.com/runtime/cli/install.sh | sh
 ```
 
-That is the newest release's `wren`. Any release's `wren` works with the others. The script checks `wren` against the release's `SHA256SUMS`, and says if the folder is not on your `PATH`. It reads these:
+The script installs the newest release's `wren` into `~/.local/bin`, after checking it against the release's `SHA256SUMS`. It tells you if that folder isn't on your `PATH`. Releases come from the public repository `MultiboxLabs/wren-runtime`.
 
-| Variable | What it does |
+| Variable | What it changes |
 | --- | --- |
-| `WREN_VERSION` | Installs that release's `wren`, such as `0.4.0`, not the newest |
-| `WREN_INSTALL_DIR` | Installs into that folder, not `~/.local/bin` |
-| `WREN_RELEASES_URL` | Fetches from a mirror of the releases page, not GitHub |
+| `WREN_VERSION` | Installs that release's `wren`, such as `0.5.0`, instead of the newest |
+| `WREN_INSTALL_DIR` | Installs into that folder instead of `~/.local/bin` |
+| `WREN_RELEASES_URL` | Downloads from a mirror of the releases page instead of GitHub |
+
+## What's in a release
+
+| Path | What it is |
+| --- | --- |
+| `Wren Framework.framework` | Chromium, with Wren Runtime inside. `wren bundle` copies it into your app. |
+| `wren-swift` | The Swift SDK, the package `Wren`, with `CWren`, the C API underneath it |
+| `wren-rust` | The Rust SDK, the crate `wren`, with `wren::sys`, the C API underneath it |
+| `include` | The C headers, with a module map |
+| `page` | `wren.d.ts`, the TypeScript types for a web view's page |
+| `bin/wren` | This command |
+| `docs`, `README.md`, `AGENTS.md` | These guides, and the release's introductions for people and for coding agents |
+| `samples` | The two sample browsers' source |
+| `app-template` | What `wren bundle` builds each app from |
+| `LICENSES` | The licences and notices to ship with your app |
+| `release.json` | Which build this is |
+
+`Wren_GetVersionInfo` reports the same build as `release.json` while your app runs. The release itself isn't signed, and `wren bundle` signs your app when it makes it.
 
 ## `wren install`
 
-Run in a project's folder, beside its `wren-app.json`:
+Run it in your project's folder, beside its `wren-app.json`:
 
-1. It reads the release the manifest names, such as `"wren": "0.4.0"`.
-2. When that release is not on this Mac, it fetches its zip and `SHA256SUMS` from `MultiboxLabs/wren-runtime`. It needs no sign-in. It uses `GH_TOKEN` or `GITHUB_TOKEN`, or else the GitHub CLI's sign-in, when there is one. GitHub allows 60 requests an hour from an address without one, and `wren install` makes three for a release.
-3. It refuses a zip that does not match `SHA256SUMS`.
-4. It unpacks the zip into `~/.wren/runtimes/<version>`, or into `$WREN_RUNTIMES/<version>` when that is set, such as for a CI cache.
-5. It links `.wren/runtime` in the project to that release, and keeps `.wren` out of git.
+1. It reads the release the manifest names, such as `"wren": "0.5.0"`.
+2. If that release isn't on this Mac yet, it downloads its zip and `SHA256SUMS` from `MultiboxLabs/wren-runtime`, and refuses a zip that doesn't match.
+3. It unpacks the release into `~/.wren/runtimes/<version>`, or `$WREN_RUNTIMES/<version>` when that's set, such as for a CI cache.
+4. It links `.wren/runtime` in your project to that release, and keeps `.wren` out of git.
 
-The project's build files name `.wren/runtime`. `Package.swift` depends on `.wren/runtime/wren-swift`, and `Cargo.toml` on `.wren/runtime/wren-rust`. A C build compiles with `-I .wren/runtime/include -F .wren/runtime`. To move to another release, change `"wren"` and run `wren install` again.
+It needs no sign-in. When there's a GitHub token, in `GH_TOKEN` or `GITHUB_TOKEN`, or from the GitHub CLI's sign-in, it uses it. Without one, GitHub allows 60 requests an hour from an address, and `wren install` makes three for each release.
 
-`.wren` is hidden and ignored by git, so tools that search a project and skip ignored files do not see the release in it. The release's documents are in `.wren/runtime/docs`, and its headers in `.wren/runtime/include`.
+Your build files point at `.wren/runtime`. `Package.swift` depends on `.wren/runtime/wren-swift`, `Cargo.toml` on `.wren/runtime/wren-rust`, and a C build compiles with `-I .wren/runtime/include -F .wren/runtime`. To move to another release, change `"wren"` in the manifest and run `wren install` again.
 
-## From source to app
+Because git ignores `.wren`, search tools that skip ignored files won't find the release. Its guides are in `.wren/runtime/docs`, and its headers in `.wren/runtime/include`.
 
-`swift build` makes an executable, not an app. A Wren app also needs the framework inside its bundle, helper apps for Chromium's child processes, and a signature macOS accepts for all of it. `wren bundle` does that.
+## `wren bundle`
+
+`swift build` or `cargo build` makes an executable, not an app. A Wren Runtime app also needs Chromium's framework inside its bundle, helper apps for Chromium's child processes, and a signature that macOS accepts for all of it. `wren bundle` makes all of that:
 
 ```sh
-# 1. Build the executable. Its Package.swift depends on the release's
-#    Swift package: .package(path: ".wren/runtime/wren-swift")
-wren install
-swift build -c release
-
-# 2. Bundle it, with the release the manifest names.
 wren bundle \
   --executable .build/release/MyBrowser \
   --manifest wren-app.json \
   --output MyBrowser.app
-
-# 3. Run it.
-open MyBrowser.app
 ```
 
-[Getting started](getting-started.md) goes through this with a first app.
-
-The app's executable must be at `MyBrowser.app/Contents/MacOS`. It loads the framework from `../Frameworks` by a fixed path. So a bare executable outside a bundle does not start.
-
-## `wren bundle`
-
-| Option | Meaning |
+| Option | What it does |
 | --- | --- |
-| `--executable PATH` | The app's compiled executable. Required. |
-| `--manifest PATH` | The app's manifest, `wren-app.json` (below). Required. |
-| `--output PATH` | The `.app` to make. Replaced if it exists. Required. |
-| `--framework PATH` | `Wren Framework.framework`. Defaults to `.wren/runtime`'s when the manifest names a release (which must be the one linked), else to the one in the release the command is in. |
-| `--identity NAME` | A `codesign` identity. Defaults to `-`, an ad hoc signature. |
-| `--template PATH` | The folder with Chromium's app `Info.plist` and localised strings. Found beside the framework (`app-template` in a release) unless given. |
-| `--incremental` | Keep the bundle at `--output` if only the executable or the resources changed, and sign only the app. Ad hoc only. See [While you develop](#while-you-develop). |
+| `--executable PATH` | Your app's compiled executable. Required. |
+| `--manifest PATH` | Your app's manifest, `wren-app.json`, described below. Required. |
+| `--output PATH` | The `.app` to make. If it exists, it's replaced. Required. |
+| `--framework PATH` | Which `Wren Framework.framework` to use. By default, the release linked at `.wren/runtime`, which must be the one the manifest names. Without a release in the manifest, the release `wren` came from. |
+| `--identity NAME` | A `codesign` identity to sign with. By default, `-`, an ad hoc signature. |
+| `--template PATH` | The folder with Chromium's app `Info.plist` and localised strings. By default, the release's `app-template`. |
+| `--incremental` | Keep the bundle when only the executable or resources changed, and sign only the app. Ad hoc only. See [While you develop](#while-you-develop). |
 
-It prints `Bundled <path>` and exits 0. The bundle it leaves has already passed `codesign --verify --deep --strict`.
+It prints `Bundled <path>` and exits 0. The bundle has already passed `codesign --verify --deep --strict`.
+
+Your executable has to stay at `MyBrowser.app/Contents/MacOS`, because it loads the framework from `../Frameworks`. On its own, outside the bundle, it won't start.
 
 ### While you develop
 
-`wren bundle` makes the whole bundle each time, which takes 2 to 3 seconds. With `--incremental` it keeps the bundle at `--output` when only the executable or the resources changed since the last `--incremental` bundle there. It copies those in and signs only the app, in under half a second. Otherwise it bundles in full, as it does without the flag. The result is the same file for file as a fresh bundle's.
+A full bundle takes 2 to 3 seconds. With `--incremental`, `wren bundle` keeps the bundle at `--output` when only the executable or the resources changed since the last `--incremental` bundle there. It copies them in and signs only the app, in under half a second, and the result is the same, file for file, as a fresh bundle.
 
 ```sh
 swift build && wren bundle --incremental \
@@ -95,15 +99,17 @@ swift build && wren bundle --incremental \
 
 A second line says what it did:
 
-- `Signed only the app`: the executable or a resource changed.
+- `Signed only the app`, when the executable or a resource changed.
 - `Nothing changed`.
-- `Bundled in full:` and why. It bundles in full when there is no app at `--output`, or when the last bundle there was made without the flag. It also does when the framework, its template, the manifest, the icon, the app's own frameworks or `wren` itself changed. And it does when the app was signed again or changed since, or when a resource that shares a name with Chromium's own, such as an `.lproj` folder, changed.
+- `Bundled in full:`, with the reason. It bundles in full when there's no app at `--output`, or the last bundle there was made without the flag. It also bundles in full when the framework, its template, the manifest, the icon, your app's own frameworks or `wren` itself changed, when the app was signed again or changed since, or when a resource with the same name as one of Chromium's, such as an `.lproj` folder, changed.
 
-It keeps a small record of each bundle in `~/Library/Caches/dev.multibox.wren-runtime.cli/bundles`, never in the app. The framework is compared by each file's size and time, not its content, as `make` does, and so are the app's frameworks. `--incremental` refuses any `--identity` but `-`, with exit status 2: a bundle signed for distribution is always made fresh, so the bundle you notarise is the one you checked.
+It keeps a small record of each bundle in `~/Library/Caches/dev.multibox.wren-runtime.cli/bundles`, never in the app. It compares frameworks by each file's size and time, as `make` does, not by content. `--incremental` with any `--identity` other than `-` exits with status 2, because a bundle signed for distribution is always made fresh, so the bundle you notarise is the one you checked.
+
+An incremental bundle also starts faster. macOS scans a bundle it hasn't seen before when it first starts, which took about 4 seconds with a development build's framework. A bundle made again from scratch at the same path gets scanned again, and an incremental one doesn't.
 
 ### The manifest
 
-`wren-app.json` holds what belongs to the app. Relative paths start from the manifest's folder.
+`wren-app.json` describes your app. Relative paths start from the manifest's folder.
 
 ```json
 {
@@ -138,77 +144,75 @@ It keeps a small record of each bundle in `~/Library/Caches/dev.multibox.wren-ru
   "frameworks": ["Sparkle.framework"],
   "infoPlist": {
     "SUFeedURL": "https://example.com/appcast.xml"
-  }
+  },
+  "wren": "0.5.0"
 }
 ```
 
-| Field | Required | Meaning |
+| Field | Required | What it is |
 | --- | --- | --- |
-| `name` | yes | The executable's name in the bundle, `CFBundleName`, and the base of the helper apps' names. A file name; it may not end in " Helper" or ")". |
-| `bundleId` | yes | The app's bundle ID, reverse-DNS. The helpers' IDs are derived from it. |
-| `displayName` | no | The name macOS shows. Defaults to `name`. |
-| `version` | no | `CFBundleShortVersionString`. Defaults to `1.0`. |
-| `build` | no | `CFBundleVersion`. Defaults to `version`. |
-| `icon` | no | The app's icon, for the Dock, Finder and notifications: an Icon Composer `.icon`, or a square PNG of 1024 pixels. Without it the app has macOS's generic icon. See below. |
-| `copyright` | no | `NSHumanReadableCopyright`. |
-| `urlSchemes` | no | URL schemes macOS offers the app for. None by default, so the app is not offered for web links. See below. |
-| `documentTypes` | no | Uniform type identifiers the app opens. None by default. See below. |
-| `importedTypes` | no | Uniform types the app opens that macOS may not know, such as WebM. See below. |
-| `exportedTypes` | no | Uniform types the app owns. See below. |
-| `usageDescriptions` | no | Text for macOS's permission prompts, by `Info.plist` key, in place of Chromium's. Each key ends in `UsageDescription`. |
-| `entitlements` | no | The app's entitlements, in place of Chrome's: a list of keys, each set to true, or an object of keys and their values. See [Signing](#signing). |
-| `provisioningProfile` | no | A provisioning profile, for entitlements Apple grants. See [Restricted entitlements and a provisioning profile](#restricted-entitlements-and-a-provisioning-profile). |
-| `resources` | no | Files and folders copied into `Contents/Resources`. |
-| `frameworks` | no | Frameworks the executable links, such as Sparkle's, copied into `Contents/Frameworks` and signed with the app (below). |
-| `infoPlist` | no | Keys added to the app's `Info.plist`, such as Sparkle's feed and public key. It may not set a key `wren bundle` writes from another field, or a usage description. |
-| `wren` | no | The Wren release the app is built with, such as `"0.4.0"`: what `wren install` links and `wren bundle` takes the framework from. |
+| `name` | Yes | The executable's name in the bundle, and `CFBundleName`. The helper apps' names start with it. It's a file name, and can't end in " Helper" or ")". |
+| `bundleId` | Yes | Your app's bundle ID, in reverse-DNS form. The helpers' IDs are made from it. |
+| `displayName` | No | The name macOS shows. By default, `name`. |
+| `version` | No | `CFBundleShortVersionString`. By default, `1.0`. |
+| `build` | No | `CFBundleVersion`. By default, `version`. |
+| `icon` | No | Your app's icon, for the Dock, Finder and notifications. An Icon Composer `.icon`, or a square PNG of 1024 pixels. Without it, the app has macOS's generic icon. See [The icon](#the-icon). |
+| `copyright` | No | `NSHumanReadableCopyright`. |
+| `urlSchemes` | No | URL schemes macOS can send your app. None by default, so macOS doesn't offer your app for web links. See below. |
+| `documentTypes` | No | File types your app opens. None by default. See below. |
+| `importedTypes`, `exportedTypes` | No | File types your app opens that macOS may not know, such as WebM, and types your app owns. See below. |
+| `usageDescriptions` | No | The text of macOS's permission prompts, by `Info.plist` key, instead of Chromium's. Each key ends in `UsageDescription`. |
+| `entitlements` | No | Your app's entitlements, instead of Chrome's. See [Signing](#signing). |
+| `provisioningProfile` | No | A provisioning profile, for entitlements Apple grants. See [Restricted entitlements](#restricted-entitlements-and-a-provisioning-profile). |
+| `resources` | No | Files and folders to copy into `Contents/Resources`. |
+| `frameworks` | No | Frameworks your executable links, such as Sparkle, copied into `Contents/Frameworks` and signed with the app. |
+| `infoPlist` | No | Keys to add to the app's `Info.plist`, such as Sparkle's feed. It can't set a key that another field writes, or a usage description. |
+| `wren` | No | The Wren Runtime release your app is built with, which `wren install` links and `wren bundle` takes the framework from. |
 
-A field of the wrong type, or a `name` or `bundleId` that cannot be used, stops the command with a message that names it.
+A field of the wrong type, or a `name` or `bundleId` that can't be used, stops the command with a message that names it.
 
-### URL types, document types and type declarations
+### URL schemes and file types
 
-- **`urlSchemes`** holds schemes and URL types. The schemes given as strings go in one URL type, named `<bundleId>.url`. An object `{ "name", "schemes" }` is a URL type of its own, such as Chromium's "Web site URL" for `http` and `https`. A scheme may be in one URL type only.
-- **`documentTypes`** holds uniform type identifiers and document types. A string is a type the app opens as a viewer. An object `{ "types", "name", "role" }` is a document type of one or more types, with `name` and `role` optional. `role` is `Viewer`, the default, `Editor`, `Shell` or `None`.
-- **`importedTypes` and `exportedTypes`** declare uniform types, imported when another app owns the type and exported when the app does. Each is `{ "identifier", "conformsTo", "description", "extensions", "mimeTypes" }`, where `conformsTo` lists at least one type and the last three are optional. A type is either imported or exported, not both. A document type that macOS may not know, such as `org.webmproject.webm`, opens in the app only once it is declared.
+- **`urlSchemes`** lists schemes and URL types. Schemes given as strings go in one URL type, named `<bundleId>.url`. An object, `{ "name", "schemes" }`, is a URL type of its own, such as "Web site URL" for `http` and `https`, which a browser needs. A scheme can be in only one URL type.
+- **`documentTypes`** lists uniform type identifiers and document types. A string is a type your app opens as a viewer. An object, `{ "types", "name", "role" }`, is a document type of one or more types, where `name` and `role` are optional. `role` is `Viewer`, the default, `Editor`, `Shell` or `None`.
+- **`importedTypes` and `exportedTypes`** declare uniform types, imported when another app owns the type, and exported when yours does. Each is `{ "identifier", "conformsTo", "description", "extensions", "mimeTypes" }`, where `conformsTo` lists at least one type and the last three are optional. A type is either imported or exported, not both. A document type macOS may not know, such as `org.webmproject.webm`, only opens in your app once it's declared.
 
-They become `CFBundleURLTypes`, `CFBundleDocumentTypes`, `UTImportedTypeDeclarations` and `UTExportedTypeDeclarations`. `infoPlist` may not set these keys.
+These become `CFBundleURLTypes`, `CFBundleDocumentTypes`, `UTImportedTypeDeclarations` and `UTExportedTypeDeclarations`, which `infoPlist` can't set.
 
 ### The icon
 
-- **An Icon Composer `.icon`** is what macOS 26 and later draw in their own style. It is layered, with the light, dark, clear and tinted looks Icon Composer shows. `wren bundle` compiles it with Xcode's `actool` into an asset catalog, `Assets.car`, and an `.icns` that earlier releases of macOS use. The icon takes the file's name, so `MyBrowser.icon` becomes `MyBrowser.icns`, named by `CFBundleIconName` and `CFBundleIconFile`. It needs Xcode 26 or later on the Mac that bundles, not only the Command Line Tools.
-- **A PNG** is scaled to every size of an `.icns` with tools every Mac has. macOS 26 shows it as it is, on its standard backing shape, without the layered looks.
+- **An Icon Composer `.icon`** is what macOS 26 and later draw in their own style, with the light, dark, clear and tinted looks Icon Composer shows. `wren bundle` compiles it with Xcode's `actool` into an asset catalog and an `.icns` for older versions of macOS. The `.icns` takes the icon's file name, so `MyBrowser.icon` becomes `MyBrowser.icns`. Compiling it needs Xcode 26 or later, not only the Command Line Tools.
+- **A PNG** is scaled to every size of an `.icns`, with tools every Mac has. macOS 26 shows it as it is, on its standard backing shape, without the layered looks.
 
-Either way, the icon also goes to the Alerts helper. macOS takes the icon of an alert-style notification from there.
+Either way, the icon also goes to the Alerts helper, which is where macOS takes the icon of an alert-style notification from.
 
-Compiling an icon takes about a second, so `wren bundle` keeps each compiled icon in `~/Library/Caches/dev.multibox.wren-runtime.cli/icons`. It uses the kept one while the icon file, the app's minimum macOS version and the tools that compile it stay the same. It keeps the 16 icons used last. You can delete the folder at any time, and the next bundle compiles the icon again.
+Compiling an icon takes about a second, so `wren bundle` keeps the 16 most recently used compiled icons in `~/Library/Caches/dev.multibox.wren-runtime.cli/icons`. It reuses one while the icon file, your app's minimum macOS version and the compiling tools stay the same. You can delete the folder at any time.
 
-### What the bundle contains
+### What's in the bundle
 
-- **The framework**, copied to `Contents/Frameworks/Wren Framework.framework`.
-- **Helper apps named after the app**, inside the framework: `<name> Helper`, `<name> Helper (Renderer)`, `<name> Helper (GPU)` and `<name> Helper (Alerts)`, and the same four with `Aperitif` in the parentheses, such as `<name> Helper (Aperitif Renderer)`, from which Chromium starts its processes. Their bundle IDs are `<bundleId>.helper`, `<bundleId>.helper.renderer` and `<bundleId>.framework.AlertNotificationService`. The Alerts helpers take the app's display name and icon, which macOS shows on alert-style notifications.
-- **`Info.plist`**, from Chromium's, with the app's identity. Chromium's URL types, document types and type declarations are removed, so the app claims only what the manifest lists, and `infoPlist`'s keys are added. The key `WrenHelperName` tells the framework where the helpers are. Do not remove it.
-- **Localised usage descriptions.** For every language Chromium has, its permission-prompt texts with the app's display name in place of "Chromium". Chromium picks its UI language from these folders, so they are all kept. A description given in the manifest replaces the localised one for that key, in every language.
-- **The icon**, from the manifest's. That is `app.icns` from a PNG, or `Assets.car` and an `.icns` from an Icon Composer icon.
-- **The app's own frameworks**, from `frameworks`, beside Wren's in `Contents/Frameworks`, as they are.
+- **The framework,** copied to `Contents/Frameworks/Wren Framework.framework`.
+- **Helper apps named after your app,** inside the framework, which Chromium starts its processes from: `<name> Helper`, `<name> Helper (Renderer)`, `<name> Helper (GPU)` and `<name> Helper (Alerts)`, and the same four with `Aperitif` in the parentheses. Their bundle IDs start with your `bundleId`. The Alerts helpers take your display name and icon, which macOS shows on alert-style notifications.
+- **`Info.plist`,** from Chromium's, with your app's identity and your `infoPlist` keys. Chromium's URL types, document types and type declarations are removed, so your app claims only what the manifest lists. Don't remove the key `WrenHelperName`, which tells the framework where the helpers are.
+- **Permission prompt text in every language Chromium has,** with your display name in place of "Chromium". Chromium picks its UI language from these folders, so they're all kept. A description in the manifest replaces that key's text in every language.
+- **Your icon,** as `app.icns` from a PNG, or an asset catalog and an `.icns` from an Icon Composer icon.
+- **Your own frameworks,** from `frameworks`, beside Wren Runtime's in `Contents/Frameworks`.
 
 ### Signing
 
-Everything is signed from the inside out, as Chrome's own signer does it. The libraries and helpers come first, all at once, then the framework, then the app.
+`wren bundle` signs everything from the inside out, as Chrome's own signing does: the libraries and helpers first, then the framework, then the app. Your own frameworks are signed the way Sparkle's documentation asks. Each bundle or executable nested in one is signed before what holds it, with the hardened runtime, its existing entitlements and its own bundle ID.
 
-The app's own frameworks are signed as Sparkle documents for its framework. Each bundle and executable nested in one, such as an XPC service, a helper app or a tool, is signed before what holds it, with the hardened runtime, the entitlements it already has, and its own bundle ID. Then the framework is signed, before the app.
-
-|  | Ad hoc (`--identity -`, the default) | Developer ID |
+|  | Ad hoc, the default | Developer ID |
 | --- | --- | --- |
-| Hardened runtime | on | on |
-| Library validation | off (no team to compare) | on, except the Renderer and GPU helpers |
+| Hardened runtime | On | On |
+| Library validation | Off, because there's no team to compare | On, except for the Renderer and GPU helpers |
 | Renderer and GPU helpers | `allow-jit` | `allow-jit` |
-| Added for development | `disable-library-validation`, `get-task-allow` (for debuggers) | nothing |
-| Timestamp | none | Apple's timestamp server (needs a network) |
-| Runs on | the Mac that made it | any Mac, once notarised |
+| Added for development | `disable-library-validation`, and `get-task-allow` for debuggers | Nothing |
+| Timestamp | None | From Apple's timestamp server, which needs a network |
+| Runs on | The Mac that made it | Any Mac, once notarised |
 
-The app's entitlements default to Chrome's: audio input, Bluetooth, camera, printing, USB, location and the photo library. They let Chromium ask macOS for those when a site asks the user. They grant nothing by themselves.
+Your app's entitlements are Chrome's unless you give your own: audio input, Bluetooth, camera, printing, USB, location and the photo library. They let Chromium ask macOS for those when a site asks the person, and grant nothing by themselves.
 
-The manifest's `entitlements` replace them, on the app alone. The helpers keep the entitlements in the table above, and the app's own frameworks keep their own. A list sets each key to true. An object gives each key its value, which may be a string, a number, a list or an object:
+The manifest's `entitlements` replace Chrome's, on the app only. The helpers and your own frameworks keep theirs. Give a list of keys, each set to true, or an object of keys and their values:
 
 ```json
 "entitlements": {
@@ -217,105 +221,104 @@ The manifest's `entitlements` replace them, on the app alone. The helpers keep t
 }
 ```
 
+An ad hoc signature changes with every build, so macOS asks again for anything it remembers by signature, the Keychain above all. Use the mock keychain while you develop, and the system keychain in a build signed with a Developer ID. See [Startup](startup.md#how-cookies-and-passwords-are-encrypted).
+
 ### Restricted entitlements and a provisioning profile
 
-macOS launches an app with some entitlements only if a provisioning profile embedded in it grants them. Passkeys in a browser, `com.apple.developer.web-browser.public-key-credential`, are one, and keychain access groups another. `wren bundle` treats every entitlement outside `com.apple.security.` as one of these. Make the profile in your Apple Developer account, for the app's bundle ID and your certificate, and name it in the manifest:
+macOS launches an app with some entitlements only if a provisioning profile in it grants them. Passkeys in a browser, `com.apple.developer.web-browser.public-key-credential`, need one, and so do keychain access groups. `wren bundle` treats every entitlement outside `com.apple.security.` this way. Make the profile in your Apple Developer account, for your bundle ID and your certificate, and name it in the manifest:
 
 ```json
 "provisioningProfile": "MyBrowser.provisionprofile"
 ```
 
-- **Signed with an identity,** the bundle holds the profile at `Contents/embedded.provisionprofile`. The app also gets `com.apple.application-identifier` and `com.apple.developer.team-identifier` from the profile, as Xcode adds them. If the manifest gives either, it must be the profile's.
-- **Signed ad hoc,** the bundle leaves out the profile and every entitlement that needs one, and `wren bundle` prints what it left out. The app launches without them, so one manifest serves development and release.
+- **Signed with an identity,** the bundle holds the profile at `Contents/embedded.provisionprofile`. The app also gets `com.apple.application-identifier` and `com.apple.developer.team-identifier` from the profile, as Xcode adds them. If the manifest gives either, it must match the profile.
+- **Signed ad hoc,** the bundle leaves out the profile and every entitlement that needs one, and `wren bundle` prints what it left out. The app launches without them, so one manifest works for development and release.
 
-Before it writes anything, `wren bundle` refuses a bundle that macOS would not launch, and says why: restricted entitlements with no profile, or a profile that does not grant an entitlement with the value the manifest gives, is for another bundle ID, is not for the signing identity's certificate, has expired, or is not for macOS. A profile's value ending in `*` grants every value that starts with what comes before it, and a list is granted when each item is.
+Before it writes anything, `wren bundle` refuses a bundle macOS wouldn't launch, and says why. That covers restricted entitlements without a profile, and a profile that doesn't grant an entitlement with the manifest's value, is for another bundle ID or another certificate, has expired, or isn't for macOS. A profile value ending in `*` grants every value that starts with what comes before it, and a list is granted when each item is.
 
-It finds the identity's certificate as `codesign` does, among the valid code-signing identities that `security find-identity -v -p codesigning` lists: by its SHA-1, or by part of its name. If no identity matches, or more than one, it stops and says so. Give the SHA-1 to choose one.
+It finds your identity's certificate the way `codesign` does, among the identities `security find-identity -v -p codesigning` lists, by its SHA-1 or part of its name. If none or several match, it stops and says so, and a SHA-1 picks one.
 
-An app with channels keeps a manifest for each, so each names its own profile.
-
-An ad hoc signature changes with every build. So macOS asks again for anything it remembers per signature, the Keychain above all. Use the mock keychain in development: `.mock` in Swift, `Keychain::Mock` in Rust, `WREN_KEYCHAIN_MOCK` in C. Use the system keychain in a build signed with a Developer ID.
+An app with several release channels keeps a manifest for each, so each names its own profile.
 
 ## `wren notarize`
 
-`wren notarize` sends an app or a zip signed with a Developer ID to Apple, and waits for the answer.
+`wren notarize` sends an app or a zip signed with a Developer ID to Apple, and waits for the answer:
 
 ```sh
-# Once: store credentials in the keychain under a name of your choosing.
+# Once, store your credentials in the keychain under a name of your choosing.
 xcrun notarytool store-credentials my-notary
 
-wren bundle --executable … --manifest wren-app.json --output MyBrowser.app \
-  --identity "Developer ID Application: Example Ltd (TEAMID)"
+wren bundle --executable .build/release/MyBrowser --manifest wren-app.json \
+  --output MyBrowser.app --identity "Developer ID Application: Example Ltd (TEAMID)"
 wren notarize MyBrowser.app --keychain-profile my-notary
 ```
 
-| Argument | Meaning |
+| Argument | What it is |
 | --- | --- |
-| `PATH` | An `.app`, or a `.zip`. |
-| `--keychain-profile NAME` | The profile `notarytool store-credentials` saved. The Apple ID and password stay in the keychain; `wren` never sees them. |
-| `--key FILE --key-id ID` | In place of a profile: an App Store Connect API key, as its `.p8` file and key ID. `notarytool` reads the file; `wren` only passes its path. |
-| `--issuer UUID` | The key's issuer ID. A team key has one; an individual key has none. |
+| `PATH` | An `.app` or a `.zip` |
+| `--keychain-profile NAME` | The profile `notarytool store-credentials` saved. Your Apple ID and password stay in the keychain, and `wren` never sees them. |
+| `--key FILE --key-id ID` | Instead of a profile, an App Store Connect API key, as its `.p8` file and key ID. `notarytool` reads the file, and `wren` only passes its path. |
+| `--issuer UUID` | The key's issuer ID, for a team key. An individual key has none. |
 
-Sign in one way or the other. An API key suits a build machine, which has no keychain profile. Make one at App Store Connect, under Users and Access, Integrations:
+An API key suits a build machine, which has no keychain profile. Make one in App Store Connect, under Users and Access, then Integrations:
 
 ```sh
 wren notarize MyBrowser.app --key AuthKey_ABC123DEFG.p8 \
   --key-id ABC123DEFG --issuer 69a6de70-0000-0000-0000-5bf3fb4eb1fc
 ```
 
-A key can also be stored as a profile once, and used by name afterwards, with `xcrun notarytool store-credentials my-notary --key … --key-id … --issuer …`.
+You can also store a key as a profile once, with `xcrun notarytool store-credentials my-notary --key … --key-id … --issuer …`, and use the profile's name after that.
 
-For an app, `wren notarize` zips a copy for the upload. Once Apple accepts it, it staples the ticket to the app, validates the staple, and asks Gatekeeper with `spctl --assess`. It ends by printing `Stapled; Gatekeeper accepts <path>`. A zip cannot carry a ticket. Gatekeeper asks Apple about a zip's contents when they are first opened.
+For an app, `wren notarize` uploads a zipped copy. Once Apple accepts it, it staples the ticket to the app, checks the staple, and asks Gatekeeper with `spctl --assess`, then prints `Stapled; Gatekeeper accepts <path>`. A zip can't carry a ticket, so Gatekeeper asks Apple about its contents when they're first opened.
 
-An app that no Developer ID signed is refused at once, before anything is uploaded, because Apple would refuse every file in it. That includes an ad hoc signature, a development certificate, and no signature. A zip is not checked.
+An app that isn't signed with a Developer ID is refused before anything is uploaded, because Apple would refuse every file in it. That includes an ad hoc signature, a development certificate, and no signature at all. A zip isn't checked.
 
-If Apple refuses the upload, the command prints Apple's log, which names each file and why, and exits 1. Submissions usually take a few minutes.
+If Apple refuses the upload, `wren notarize` prints Apple's log, which names each file and why, and exits 1. Notarising usually takes a few minutes.
 
 ## `wren pack-extension`
 
-`wren pack-extension` packs an extension's folder as a `.crx` file, for an app to list among the extensions it ships. See [Extensions your app ships](extensions.md).
+`wren pack-extension` packs an extension's folder as a `.crx` file, for your app to ship. See [Extensions your app ships](extensions.md).
 
 ```sh
-# The first version: make the key.
+# The first version, which makes the key.
 wren pack-extension Blocker --key ~/keys/blocker.pem --new-key --output Blocker.crx
-# Every later one: the same key.
+# Every later version, with the same key.
 wren pack-extension Blocker --key ~/keys/blocker.pem --output Blocker.crx
 ```
 
-It prints the extension's ID and version. The key is an RSA private key in a PEM file, and it fixes the ID. So `wren` makes one only with `--new-key`, never replaces a file that exists, and refuses a key inside the extension's folder, which would be packed with it. It makes the key readable only by you. A key from Chrome's Pack extension works too. Hidden files, such as `.DS_Store`, are left out, as Chrome leaves them.
+It prints the extension's ID and version. The key is an RSA private key in a PEM file, and it decides the extension's ID. So `wren` makes a key only with `--new-key`, never replaces an existing file, and refuses a key inside the extension's folder, which would be packed with it. The key it makes is readable only by you. A key from Chrome's Pack Extension works too.
 
-It checks only that `manifest.json` has a `version`. Chromium checks the rest when it installs the file.
+Hidden files, such as `.DS_Store`, are left out, as Chrome leaves them out. `wren` checks only that `manifest.json` has a `version`, and Chromium checks the rest when it installs the extension.
 
 ## `wren extension-id`
 
-`wren extension-id` prints an extension's ID, and nothing else, so a build can compare it with the ID the app expects:
+`wren extension-id` prints an extension's ID and nothing else, so a build can compare it with the ID your app expects:
 
 ```sh
 test "$(wren extension-id Blocker.crx)" = fkgkibajhfbepljeaefdnfnegdcjomkh
 ```
 
-For a `.crx`, the ID is the one its signed header declares. `wren` checks the file as Chromium does when it installs it: one of its keys must give that ID, and every signature must verify over the header and the archive. So a file that passes is one Chromium will install under that ID. A file that is not a CRX3 file, a declared ID that none of its keys gives, and a signature that fails each exit 1.
+For a `.crx`, it checks the file as Chromium does when it installs one. One of its keys must give the ID its header declares, and every signature must verify. So a file that passes is one Chromium will install under that ID. A file that isn't a CRX3 file, or whose keys or signatures don't match, exits 1.
 
-For a folder, the ID comes from the `key` in its `manifest.json`, as Wren reads an [internal extension's](extensions.md#internal-extensions). A folder with no `key` that Chromium can read exits 1, since Chromium would give that extension an ID from its path.
+For a folder, the ID comes from the `key` in its `manifest.json`, as for an [internal extension](extensions.md#internal-extensions). A folder without a readable `key` exits 1, because Chromium would give that extension an ID based on its path.
 
 ## Exit status
 
-| Status | Meaning |
+| Status | What it means |
 | --- | --- |
 | 0 | Done. |
-| 1 | It could not be done: a missing file, a bad manifest, `codesign` or Apple refused. The message says which. |
-| 2 | The command line was wrong; usage is printed. |
+| 1 | It couldn't be done, such as for a missing file or a bad manifest, or because `codesign` or Apple refused. The message says which. |
+| 2 | The command line was wrong, and `wren` prints its usage. |
 
 ## Things to know
 
-- **The first launch of a new bundle is slow.** macOS scans a bundle it has not seen before when it first starts, before the framework loads. With a development build's framework the scan took about 4 seconds, and later launches a fraction of a second. A bundle made again from scratch at the same path is scanned again. `--incremental` keeps the bundle, so only its first launch waits.
-- **Started from a terminal, the terminal is named.** macOS attributes permission prompts and notifications to the app responsible for the process. Run the executable directly from a shell, and prompts say the terminal's name. Start the app with `open`, or from Finder, and they say the app's.
-- **An empty folder in Application Support.** A bundled app creates `~/Library/Application Support/<name>`, Chromium's default data folder, even when its data is elsewhere. Crash reports go to `Crashpad` inside the app's user-data directory.
-- **One framework per app.** Each app carries its own copy, about 350 MB in release 0.4.0, as Electron apps do. It must be bundled with the release it was compiled against, because the framework accepts only its own API version.
-- **Chromium's notices go with the app.** The framework is Chromium, whose licence and third-party licences ask that their notices go with every copy. A release has them in `LICENSES`: `Chromium.txt`, `third-party.txt`, and `credits.html`, the page an app's `chrome://credits` shows. `Source.txt` says where the source of the LGPL and MPL files Wren changes is, which the people who get your app may ask for. Ship all four with your app, for example in its Resources folder, linked from its About window.
+- **Each app carries its own framework,** about 350 MB in release 0.5.0, as Electron apps do. It runs only with the release your app was built against, because the framework accepts only its own API version.
+- **Started from a terminal, prompts name the terminal.** macOS names the app responsible for a process in permission prompts and notifications. Run the executable from a shell, and they name your terminal. Start the app with `open` or from Finder, and they name your app.
+- **An empty folder appears in Application Support.** A bundled app creates `~/Library/Application Support/<name>`, Chromium's default data folder, even when its data is elsewhere.
+- **Ship Chromium's notices with your app.** Chromium's licence and its third-party licences ask that their notices go with every copy. A release has them in `LICENSES`: `Chromium.txt`, `third-party.txt`, and `credits.html`, which your app's `chrome://credits` shows. `Source.txt` says where to get the source of the LGPL and MPL files Wren Runtime changes, which people who get your app may ask for. Ship all four with your app, such as in its Resources folder, linked from its About window.
 
-## Not done yet
+## Not available yet
 
-- A disk image. `wren` makes the app, not a `.dmg`.
-- Passkeys in the system keychain. `wren bundle` signs an app with the entitlement Apple grants to browsers on request, and with its profile, but passkeys have not been tried in a Wren app signed that way.
+- Disk images. `wren` makes the app, not a `.dmg`.
+- Passkeys in the system keychain haven't been tried. `wren bundle` signs an app with the entitlement Apple grants browsers on request, and its profile, but nobody has tried passkeys in an app signed that way yet.
 - Windows and Linux.

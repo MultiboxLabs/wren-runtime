@@ -27,7 +27,7 @@
 #include "Wren.h"
 
 // The version of this header. Set WrenStartup.unstable_ui_version to it.
-#define WREN_UNSTABLE_UI_VERSION 4
+#define WREN_UNSTABLE_UI_VERSION 5
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,10 +73,10 @@ typedef enum WrenUIText {
 
 // Copies the site's WREN_UI_TEXT_SITE, _TITLE or _DETAILS, in UTF-8. _TITLE is
 // the security summary. Returns the length needed, including the NUL.
-WREN_API size_t Wren_CopySiteText(WrenBrowser* browser,
-                                  WrenUIText text,
-                                  char* buffer,
-                                  size_t size);
+WREN_API size_t Wren_CopySiteUIText(WrenBrowser* browser,
+                                    WrenUIText text,
+                                    char* buffer,
+                                    size_t size);
 
 // Copies a permission's WREN_UI_TEXT_ID, _LABEL or _STATE.
 //
@@ -85,19 +85,19 @@ WREN_API size_t Wren_CopySiteText(WrenBrowser* browser,
 // - _LABEL is its name for people, such as "Location".
 // - _STATE is its state for people, such as "Allowed", "Ask (default)" or
 //   "Using now".
-WREN_API size_t Wren_CopySitePermissionText(WrenBrowser* browser,
-                                            size_t index,
-                                            WrenUIText text,
-                                            char* buffer,
-                                            size_t size);
+WREN_API size_t Wren_CopySitePermissionUIText(WrenBrowser* browser,
+                                              size_t index,
+                                              WrenUIText text,
+                                              char* buffer,
+                                              size_t size);
 
 // Copies a device's WREN_UI_TEXT_ID, which is the content setting name of
 // its kind, or its _LABEL, which is the device's name.
-WREN_API size_t Wren_CopySiteDeviceText(WrenBrowser* browser,
-                                        size_t index,
-                                        WrenUIText text,
-                                        char* buffer,
-                                        size_t size);
+WREN_API size_t Wren_CopySiteDeviceUIText(WrenBrowser* browser,
+                                          size_t index,
+                                          WrenUIText text,
+                                          char* buffer,
+                                          size_t size);
 
 // --- Extensions state (the extensions menu) ---------------------------------
 
@@ -126,10 +126,10 @@ WREN_API WrenResult Wren_GetExtensionsSiteState(WrenBrowser* browser,
                                                 WrenExtensionsSiteState* state);
 // Copies WREN_UI_TEXT_TITLE, the site setting's label as the redesign shows
 // it.
-WREN_API size_t Wren_CopyExtensionsSiteText(WrenBrowser* browser,
-                                            WrenUIText text,
-                                            char* buffer,
-                                            size_t size);
+WREN_API size_t Wren_CopyExtensionsSiteUIText(WrenBrowser* browser,
+                                              WrenUIText text,
+                                              char* buffer,
+                                              size_t size);
 
 typedef struct WrenExtensionSiteAccess {
   WrenSiteInteraction interaction;
@@ -156,28 +156,28 @@ Wren_GetExtensionSiteAccess(WrenBrowser* browser,
                             const char* extension_id,
                             WrenExtensionSiteAccess* access);
 // Copies WREN_UI_TEXT_TOOLTIP, the tooltip of the redesign's switch.
-WREN_API size_t Wren_CopyExtensionSiteAccessText(WrenBrowser* browser,
-                                                 const char* extension_id,
-                                                 WrenUIText text,
-                                                 char* buffer,
-                                                 size_t size);
+WREN_API size_t Wren_CopyExtensionSiteAccessUIText(WrenBrowser* browser,
+                                                   const char* extension_id,
+                                                   WrenUIText text,
+                                                   char* buffer,
+                                                   size_t size);
 
 // Copies WREN_UI_TEXT_TOOLTIP, the extensions button's tooltip, or _DETAILS,
 // the tooltip of the button that requests access.
-WREN_API size_t Wren_CopyExtensionsButtonText(WrenBrowser* browser,
-                                              WrenUIText text,
-                                              char* buffer,
-                                              size_t size);
+WREN_API size_t Wren_CopyExtensionsButtonUIText(WrenBrowser* browser,
+                                                WrenUIText text,
+                                                char* buffer,
+                                                size_t size);
 
 // --- Zoom state -------------------------------------------------------------
 
 // Names the extension that set the zoom level last, through
 // chrome.tabs.setZoom, as Chrome's zoom bubble names it. WREN_UI_TEXT_ID
 // copies its ID, and _LABEL its name. Both copy "" if the user set the level.
-WREN_API size_t Wren_CopyZoomText(WrenBrowser* browser,
-                                  WrenUIText text,
-                                  char* buffer,
-                                  size_t size);
+WREN_API size_t Wren_CopyZoomUIText(WrenBrowser* browser,
+                                    WrenUIText text,
+                                    char* buffer,
+                                    size_t size);
 
 // --- Bookmark state ---------------------------------------------------------
 
@@ -195,10 +195,10 @@ WREN_API WrenResult Wren_GetBookmarkState(WrenBrowser* browser,
                                           WrenBookmarkState* state);
 // Copies WREN_UI_TEXT_TITLE, the bookmark's title. "" when the page is not
 // bookmarked.
-WREN_API size_t Wren_CopyBookmarkText(WrenBrowser* browser,
-                                      WrenUIText text,
-                                      char* buffer,
-                                      size_t size);
+WREN_API size_t Wren_CopyBookmarkUIText(WrenBrowser* browser,
+                                        WrenUIText text,
+                                        char* buffer,
+                                        size_t size);
 
 // The kinds of row in the folder list of Chrome's bookmark bubble. The list
 // has recently used folders and the main ones, under headings when the user
@@ -275,18 +275,18 @@ Wren_GetContentSettingContent(WrenBrowser* browser,
 // - _TOOLTIP, the manage control's tooltip
 // - _ACCEPT, the Done button
 // - _DECLINE, the Cancel button, or "" if there is none
-WREN_API size_t Wren_CopyContentSettingText(WrenBrowser* browser,
-                                            WrenContentSetting setting,
-                                            WrenUIText text,
-                                            char* buffer,
-                                            size_t size);
+WREN_API size_t Wren_CopyContentSettingUIText(WrenBrowser* browser,
+                                              WrenContentSetting setting,
+                                              WrenUIText text,
+                                              char* buffer,
+                                              size_t size);
 // Copies an item's WREN_UI_TEXT_TITLE or _DETAILS.
-WREN_API size_t Wren_CopyContentSettingItemText(WrenBrowser* browser,
-                                                WrenContentSetting setting,
-                                                size_t index,
-                                                WrenUIText text,
-                                                char* buffer,
-                                                size_t size);
+WREN_API size_t Wren_CopyContentSettingItemUIText(WrenBrowser* browser,
+                                                  WrenContentSetting setting,
+                                                  size_t index,
+                                                  WrenUIText text,
+                                                  char* buffer,
+                                                  size_t size);
 // Copies a choice's text.
 WREN_API size_t Wren_CopyContentSettingChoiceText(WrenBrowser* browser,
                                                   WrenContentSetting setting,
@@ -341,10 +341,10 @@ WREN_API WrenResult Wren_ContentSettingAction(WrenBrowser* browser,
 //   _SITE, the site as Chrome names it there.
 // - A toast has _TITLE, its text such as "Link copied", and _ACCEPT, its
 //   button's text, which is "" with no button.
-WREN_API size_t Wren_CopyPopoverText(WrenPopoverID popover,
-                                     WrenUIText text,
-                                     char* buffer,
-                                     size_t size);
+WREN_API size_t Wren_CopyPopoverUIText(WrenPopoverID popover,
+                                       WrenUIText text,
+                                       char* buffer,
+                                       size_t size);
 
 // Translating the page.
 
@@ -361,11 +361,11 @@ WREN_API size_t Wren_CopyTranslateLanguage(WrenPopoverID popover,
 // Copies a requested permission's WREN_UI_TEXT_ID or _LABEL. _ID is
 // Chromium's content setting name, such as "geolocation". _LABEL is Chrome's
 // line for it, such as "Know your location".
-WREN_API size_t Wren_CopyPermissionText(WrenPopoverID popover,
-                                        size_t index,
-                                        WrenUIText text,
-                                        char* buffer,
-                                        size_t size);
+WREN_API size_t Wren_CopyPermissionUIText(WrenPopoverID popover,
+                                          size_t index,
+                                          WrenUIText text,
+                                          char* buffer,
+                                          size_t size);
 
 // Copies the label of a toast's menu item, or "" for a separator.
 WREN_API size_t Wren_CopyToastMenuItemText(WrenPopoverID popover,
@@ -381,10 +381,10 @@ WREN_API size_t Wren_CopyToastMenuItemText(WrenPopoverID popover,
 //   "Failed - Network error" or "Done".
 // - _MESSAGE is its warning, for a download Chrome warns about, such as "This
 //   file is dangerous, so Chromium has blocked it".
-WREN_API size_t Wren_CopyDownloadText(WrenDownloadID download,
-                                      WrenUIText text,
-                                      char* buffer,
-                                      size_t size);
+WREN_API size_t Wren_CopyDownloadUIText(WrenDownloadID download,
+                                        WrenUIText text,
+                                        char* buffer,
+                                        size_t size);
 
 // Copies Chrome's sentences for a prompt before closing or quitting with
 // downloads in progress. They are valid until the prompt is answered.
@@ -393,10 +393,10 @@ WREN_API size_t Wren_CopyDownloadText(WrenDownloadID download,
 // - _DETAILS, such as "Quit Incognito mode anyway?"
 // - _ACCEPT, the button that cancels the downloads, such as "Quit"
 // - _DECLINE, the button that keeps them, such as "Continue Downloading"
-WREN_API size_t Wren_CopyDownloadsPromptText(WrenDownloadsPromptID prompt,
-                                             WrenUIText text,
-                                             char* buffer,
-                                             size_t size);
+WREN_API size_t Wren_CopyDownloadsPromptUIText(WrenDownloadsPromptID prompt,
+                                               WrenUIText text,
+                                               char* buffer,
+                                               size_t size);
 
 #ifdef __cplusplus
 }  // extern "C"

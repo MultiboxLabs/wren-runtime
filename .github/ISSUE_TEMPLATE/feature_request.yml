@@ -1,15 +1,15 @@
 name: Feature request
-description: Wren cannot do something your app needs.
+description: Wren Runtime can't do something your app needs.
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
-      value: Search the open issues first. `docs/this-release.md` of your release lists what Wren does not do yet.
+      value: Please search the open issues first. Your release's `docs/limitations.md` lists what Wren Runtime can't do yet.
   - type: textarea
     id: need
     attributes:
       label: What your app needs
-      description: What you are building, and what Wren cannot do for it.
+      description: What you're building, and what Wren Runtime can't do for it.
     validations:
       required: true
   - type: textarea

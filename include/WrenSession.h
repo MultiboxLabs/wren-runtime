@@ -82,6 +82,9 @@ typedef void (*WrenRestoreCallback)(void* context,
 // opens again. A call that returns another error, or WREN_ERROR_NOT_ALLOWED for
 // an off-the-record Profile or from inside a callback, restored nothing, and
 // can be made again.
+//
+// A quit asked while a restore is under way waits for it. `callback` runs, and
+// the restored Browsers open, before the quit goes on.
 WREN_API void Wren_RestoreLastSession(WrenProfile* profile,
                                       WrenRestoreCallback callback,
                                       void* context);
@@ -141,14 +144,9 @@ WREN_API size_t Wren_CopyBrowserSessionTag(WrenBrowser* browser,
 //
 // An off-the-record Profile has no session, so its tabs' IDs last only while
 // the tabs are open.
-
-// Copies `tab`'s persistent ID, or "" if the tab is not available. Compare
-// the ID whole. Its form may change, so do not parse it. It never changes
-// while the tab lives, so no change is reported. It can be read at any time,
-// also from inside on_popover and the other callbacks inside Chromium's call.
-WREN_API size_t Wren_CopyTabPersistentID(WrenTabID tab,
-                                         char* buffer,
-                                         size_t size);
+//
+// Wren_CopyTabText copies a tab's persistent ID, with
+// WREN_TAB_TEXT_PERSISTENT_ID (WrenTabs.h).
 
 // --- Closed tabs ------------------------------------------------------------
 

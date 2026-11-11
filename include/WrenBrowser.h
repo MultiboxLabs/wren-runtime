@@ -29,7 +29,8 @@ typedef void (*WrenProfileCallback)(void* context,
 // loads if needed, or an off-the-record or ephemeral Profile that is open.
 // NULL opens the startup Profile: the one Chromium started this launch on.
 // As in Chrome, that is the persistent Profile whose Browser was active last,
-// and "Default" in a new user_data_dir. It stays the same until the app quits.
+// and "Default" in a new user_data_dir. It stays the same until the app quits,
+// unless it is deleted (see Wren_DeleteProfile).
 WREN_API void Wren_OpenProfile(const char* id,
                                WrenProfileCallback callback,
                                void* context);
@@ -89,8 +90,11 @@ WREN_API WrenResult Wren_RenameProfile(WrenProfile* profile, const char* name);
 // off-the-record Profiles have closed, and so have their web views' pages.
 // WREN_CHANGE_PROFILE_CLOSED reports each handle the app has. The list no
 // longer has the Profile, and Wren_OpenProfile refuses its ID. The startup
-// Profile can be deleted too. Wren_OpenProfile(NULL) then fails until the next
-// launch, which starts on another Profile, as Chrome does.
+// Profile can be deleted too. Wren_OpenProfile(NULL) then opens the persistent
+// Profile that Chromium moves to, as Chrome does: the one whose Browser was
+// active last, or another listed Profile. Unless an ephemeral Profile's
+// Browser was active last, the next launch starts on that Profile too. It
+// stays the startup Profile until the app quits, unless it is deleted too.
 //
 // A delete from Chromium's own pages, such as chrome://profile-picker in a
 // tab, closes the handles and pages the same way.
@@ -106,11 +110,21 @@ WREN_API void Wren_DeleteProfile(WrenProfile* profile,
                                  WrenResultCallback callback,
                                  void* context);
 
+// Which of a listed Profile's strings Wren_CopyProfileListText copies.
+typedef enum WrenProfileListText {
+  // The Profile's ID, its directory name, as Wren_CopyProfileID gives it.
+  WREN_PROFILE_LIST_TEXT_ID = 0,
+  // The Profile's name, as Chrome's Profile menu shows it.
+  WREN_PROFILE_LIST_TEXT_NAME = 1,
+} WrenProfileListText;
+
 // The persistent Profiles in user_data_dir, loaded or not: their number, and
-// the ID and name of each.
+// the ID and name of each. Wren_CopyProfileListText returns the length
+// needed, including the NUL. It copies "" for an index past the end, and for
+// a value outside WrenProfileListText.
 WREN_API size_t Wren_GetProfileListCount(void);
-WREN_API size_t Wren_CopyProfileListID(size_t index, char* buffer, size_t size);
-WREN_API size_t Wren_CopyProfileListName(size_t index,
+WREN_API size_t Wren_CopyProfileListText(size_t index,
+                                         WrenProfileListText text,
                                          char* buffer,
                                          size_t size);
 // Gets the avatar ID of the Profile at `index` into `avatar`. Returns false
@@ -306,7 +320,11 @@ typedef struct WrenCookie {
   const char* domain;
   const char* path;
   // Milliseconds since 1970, UTC. 0 for `expires_ms` is a session cookie, and
-  // 0 for the others is now.
+  // 0 for the others is now. Chromium keeps a cookie at most 400 days past its
+  // creation date, and Chrome's own cookies can be older. So Wren_AddCookies
+  // keeps `expires_ms` up to 400 days from now. It moves a creation date more
+  // than 400 days before that expiry to 400 days before it, and a last access
+  // earlier than that creation date to it.
   int64_t created_ms;
   int64_t expires_ms;
   int64_t last_access_ms;
@@ -714,17 +732,23 @@ typedef struct WrenSidePanelState {
 WREN_API void* Wren_GetSidePanelView(WrenBrowser* browser);
 WREN_API WrenResult Wren_GetSidePanelState(WrenBrowser* browser,
                                            WrenSidePanelState* state);
-// Copies Chromium's name for the open panel, in UTF-8, or "" if none is open.
-// Names include "ReadingList", "Bookmarks", "CustomizeChrome", and
-// "Extension" followed by the extension's ID. Returns the length needed,
-// including the NUL.
-WREN_API size_t Wren_CopySidePanelID(WrenBrowser* browser,
-                                     char* buffer,
-                                     size_t size);
-// Copies the open panel's title, in Chromium's language, or "".
-WREN_API size_t Wren_CopySidePanelTitle(WrenBrowser* browser,
-                                        char* buffer,
-                                        size_t size);
+// Which of the open panel's strings Wren_CopySidePanelText copies.
+typedef enum WrenSidePanelText {
+  // Chromium's name for the open panel. Names include "ReadingList",
+  // "Bookmarks", "CustomizeChrome", and "Extension" followed by the
+  // extension's ID.
+  WREN_SIDE_PANEL_TEXT_ID = 0,
+  // The open panel's title, in Chromium's language.
+  WREN_SIDE_PANEL_TEXT_TITLE = 1,
+} WrenSidePanelText;
+
+// Copies one of the open panel's strings, in UTF-8, or "" if none is open.
+// Returns the length needed, including the NUL. A value outside
+// WrenSidePanelText copies "".
+WREN_API size_t Wren_CopySidePanelText(WrenBrowser* browser,
+                                       WrenSidePanelText text,
+                                       char* buffer,
+                                       size_t size);
 // Opens the panel with this ID, as Chromium names it, in the Browser or for
 // its active tab. WREN_CHANGE_SIDE_PANEL follows once the panel's page is
 // ready.

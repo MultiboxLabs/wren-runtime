@@ -1,31 +1,12 @@
 # The C API
 
-Wren's API is a C API. The Swift API and the Rust crate are layers over it, with the same functions under their own names. Each Swift and Rust item's comment names the C function it calls. So everything in these guides can be done from C, Objective-C or C++, or from any language that can call C.
+Underneath the Swift SDK and the Rust SDK, Wren Runtime is a C API, so you can use it directly from C, Objective-C or C++, or wrap it in any language that can call C. Everything in these guides works from C, because the SDKs call the same functions. This page explains the rules every function follows, so the headers make sense.
 
-The headers are the reference. This page explains how to read them.
+The headers are the reference, and their comments are the full contract. A release has them in `include`, with a module map that names the module `CWren`. Each Swift and Rust item's comment names the C function it calls.
 
-| Header | What is in it |
-| --- | --- |
-| `Wren.h` | The shared types and results, startup, changes, the app's callbacks, `Wren_Main` and the version. It includes the others. |
-| `WrenBrowser.h` | Profiles, their password manager, importing history and cookies, Browsers, several Browsers in one window, full screen, side panels. |
-| `WrenTabs.h` | Tabs, navigation, tab groups, a tab's view, splits, DevTools, what a tab is doing and muting it. |
-| `WrenExtensions.h` | Extensions' actions, a Profile's installed extensions, installing from the Chrome Web Store, and the app's own. |
-| `WrenToolbar.h` | Anchors, page actions, content setting icons. |
-| `WrenDownloads.h` | A Profile's downloads, its whole download history, the download button, the prompts before closing or quitting with downloads in progress. |
-| `WrenUI.h` | Popover requests, and the state behind Chromium's popovers: the site, extensions' access, zoom, the bookmark, content settings, passwords, addresses, cards, permission prompts. |
-| `WrenOmnibox.h` | What the address field shows, and Chromium's suggestions. |
-| `WrenBookmarks.h` | A Profile's bookmarks, read and changed: the bar, folders, opening one. |
-| `WrenSession.h` | The last session, restoring it, reopening closed tabs. |
-| `WrenSchemes.h` | The app's own URL schemes. |
-| `WrenWebView.h` | Pages that are not tabs. |
-| `WrenMenus.h` | The main menu and context menus, from the app's items. |
-| `WrenClipboard.h` | The system clipboard: text, and a URL with its title, written and read. |
-| `WrenUpdates.h` | The update state Chromium's About page shows, its requests for a check, relaunching, and handing a relaunch to the app's updater. |
-| `WrenUnstableUI.h` | Chrome's sentences and the layout of three bubbles. It may change in any release. See [compatibility](compatibility.md). |
+## A first app in Objective-C
 
-A release has them in `include`, with a module map that names the module `CWren`.
-
-## A minimal app
+This is the app from [Getting started](getting-started.md), in Objective-C:
 
 ```objc
 #import <AppKit/AppKit.h>
@@ -84,7 +65,7 @@ static void OnChanged(void* context, const WrenChange* changes, size_t count) {
       continue;
     }
     char title[256];
-    Wren_CopyTabTitle(changes[i].tab, title, sizeof(title));
+    Wren_CopyTabText(changes[i].tab, WREN_TAB_TEXT_TITLE, title, sizeof(title));
     g_window.title = @(title);
   }
 }
@@ -119,7 +100,7 @@ int main(void) {
 }
 ```
 
-Compile it against the release `wren install` linked, and bundle the result. The project's `wren-app.json` names the release, as in [Getting started](getting-started.md).
+Compile it against the release `wren install` linked, then bundle it, with a `wren-app.json` as in Getting started:
 
 ```sh
 wren install
@@ -129,70 +110,95 @@ wren bundle --executable MyBrowser \
   --manifest wren-app.json --output MyBrowser.app
 ```
 
-## Conventions
+## The headers
+
+`Wren.h` includes all the others, so it's the only one to include.
+
+| Header | What's in it |
+| --- | --- |
+| `Wren.h` | Shared types and results, startup, changes, your app's callbacks, `Wren_Main`, the versions, and work from other threads |
+| `WrenBrowser.h` | Profiles and their password manager, importing history and cookies, Browsers, several Browsers in one window, full screen and side panels |
+| `WrenTabs.h` | Tabs and navigation, tab groups, a tab's view, splits, DevTools, and what a tab is doing |
+| `WrenExtensions.h` | Extensions' buttons, a Profile's installed extensions, installing from the Chrome Web Store, and your app's own |
+| `WrenToolbar.h` | Where bubbles open from, page actions and site setting icons |
+| `WrenDownloads.h` | A Profile's downloads and download history, the download button, and the prompts before closing or quitting |
+| `WrenUI.h` | Chromium's popovers as requests, and the state behind them |
+| `WrenPrompts.h` | Chromium's prompts and toasts as data, and your app's own toasts |
+| `WrenOmnibox.h` | What the address field shows, and Chromium's suggestions |
+| `WrenBookmarks.h` | A Profile's bookmarks |
+| `WrenSession.h` | The last session, restoring it, and reopening closed tabs |
+| `WrenSchemes.h` | Your own URL schemes |
+| `WrenWebView.h` | Web views, and messages with their pages |
+| `WrenMenus.h` | The main menu and context menus |
+| `WrenClipboard.h` | Text and URLs on the system clipboard |
+| `WrenApp.h` | Quitting, Warn Before Quitting and your own warning, relaunching, your updates on Chromium's About page, and being the default browser |
+| `WrenUnstableUI.h` | Chrome's own sentences and the layout of three bubbles, which can change in any release. See [Compatibility](compatibility.md). |
+
+## The rules every function follows
 
 ### Threads and timing
 
-- Call everything on the main thread, after `on_ready`. Only `Wren_Main`, `Wren_GetAPIVersion` and `Wren_GetVersionInfo` may be called before. The four functions that format and parse group and split IDs may be called on any thread at any time.
-- `Wren_PostToMainThread` may be called on any thread, from just before `on_ready` until the event loop ends. It runs a function of the app's on the main thread, from the event loop, as a completion callback runs. Work posted from one thread runs in the order it was posted. Work still waiting when the event loop ends gets its `discard` function instead, on the main thread, before `Wren_Main` returns.
-- Completion callbacks, such as those of `Wren_OpenProfile` and `Wren_CreateBrowser`, run later from the event loop. They never run inside the call that started them.
-- `on_changed` and most other delegate callbacks run from the event loop, not inside a Chromium notification. So they may call any function.
-- `on_popover`, `on_fullscreen`, `on_downloads_prompt` and `on_quit_prompt` are the exceptions. They run inside Chromium's call. Until they return, calls that change Browsers, tabs or popovers return `WREN_ERROR_NOT_ALLOWED`.
-- `on_profile_extensions` runs inside Chromium's call too, as a Profile loads. It makes no Wren calls.
-- Closing a tab or a Browser, and `Wren_Quit`, are requests that take effect after the caller returns. Other calls take effect before they return, and the matching `on_changed` record follows.
+- **Call everything on the main thread, after `on_ready`.** The exceptions are `Wren_Main`, `Wren_GetAPIVersion`, `Wren_GetVersionInfo`, the functions that format and parse group and split IDs, and `Wren_PostToMainThread`.
+- **`Wren_PostToMainThread` works from any thread,** from just before `on_ready` until the event loop ends. It runs your function on the main thread, from the event loop, in the order each thread posted. Work still waiting when the event loop ends gets its `discard` function instead, on the main thread, before `Wren_Main` returns.
+- **Completion callbacks run later,** from the event loop, never inside the call that started them. That goes for `Wren_OpenProfile`, `Wren_CreateBrowser` and the rest.
+- **Most delegate callbacks run from the event loop,** including `on_changed`, `on_reopen` and `on_open_urls`, so they can call any function.
+- **Some run inside Chromium's call.** `on_popover`, `on_fullscreen`, `on_downloads_prompt`, `on_quit_prompt`, `on_quit_committed` and `on_navigation` run while Chromium waits. Until they return, calls that change Browsers, tabs, navigation or popovers return `WREN_ERROR_NOT_ALLOWED`. `on_profile_extensions` also runs inside Chromium's call, and can make no Wren Runtime calls at all.
+- **Closing is a request.** `Wren_CloseTab`, `Wren_CloseTabs`, `Wren_CloseBrowsers` and `Wren_Quit` take effect after you return, and a page can cancel them. Every other call takes effect before it returns, and its `on_changed` record follows later.
 
 ### Handles
 
 `WrenProfile*` and `WrenBrowser*` are reference-counted.
 
-- A callback that creates or opens one gives you one reference. Those are `WrenProfileCallback`, `WrenBrowserCallback` and `on_browser_opened`. Release it with `Wren_ReleaseProfile` or `Wren_ReleaseBrowser`.
-- A handle passed to any other callback, or returned by a `Get` function, is borrowed. Use it during the call, and retain it to keep it.
-- A handle stays valid until its last reference is released, even after what it names has closed. Calls on it then return `WREN_ERROR_CLOSED` or do nothing.
-- One Chromium Profile or Browser always has the same handle, so handles compare with `==`.
+- **A callback that creates or opens one gives you a reference.** Those are `WrenProfileCallback`, `WrenBrowserCallback` and `on_browser_opened`. Release it with `Wren_ReleaseProfile` or `Wren_ReleaseBrowser`.
+- **Every other handle is borrowed,** whether a callback passed it or a `Get` function returned it. Use it during the call, and retain it to keep it.
+- **A handle stays valid until you release it,** even after what it names has closed. Calls on it then return `WREN_ERROR_CLOSED` or do nothing.
+- **One Profile or Browser always has the same handle,** so you can compare handles with `==`.
 
-`WrenWebView*` is not counted. You own it from `Wren_CreateWebView` until `Wren_DestroyWebView`.
+`WrenWebView*` isn't counted. You own it from `Wren_CreateWebView` until `Wren_DestroyWebView`.
 
-Tabs, tab groups, splits and popover requests are plain values: `WrenTabID`, `WrenTabGroupID`, `WrenSplitID` and `WrenPopoverID`. There is nothing to release, and an ID is never reused while the process runs. A group's or a split's ID has a text form, Chromium's, for a page or a file. See `Wren_FormatTabGroupID` and `Wren_ParseTabGroupID`, and the same for a split.
+Tabs, tab groups, splits and popover requests are plain values: `WrenTabID`, `WrenTabGroupID`, `WrenSplitID` and `WrenPopoverID`. There's nothing to release, and Chromium never reuses an ID while the process runs. Group and split IDs also have a text form, for a page or a file, from `Wren_FormatTabGroupID` and `Wren_ParseTabGroupID`, and their split versions.
 
 ### Views
 
-A view is passed as `void*`, and is an `NSView*`. Views Wren returns are borrowed, as from `Wren_GetTabView`, `Wren_GetSidePanelView` and `Wren_GetWebViewNativeView`. Wren holds the views you pass weakly, as to `Wren_AttachBrowserToView` and `Wren_SetAnchor`.
+A view is passed as a `void*`, and is an `NSView*`. Views you get back, such as from `Wren_GetTabView`, `Wren_GetSidePanelView` and `Wren_GetWebViewNativeView`, are borrowed. Wren Runtime holds the views you pass in weakly, such as to `Wren_AttachBrowserToView` and `Wren_SetAnchor`.
 
-### Strings
+### Strings and images
 
-Strings are UTF-8. A string you pass in need only be valid during the call.
+Strings are UTF-8. A string you pass in only needs to be valid during the call.
 
-Strings come out through `Copy` functions. Each fills your buffer, and returns the size needed, including the terminating NUL. To read one of any length, ask first:
+Strings come out through `Copy` functions, which fill your buffer and return the size needed, including the final NUL. To read a string of any length, ask for its size first:
 
 ```c
-size_t needed = Wren_CopyTabURL(tab, NULL, 0);
+size_t needed = Wren_CopyTabText(tab, WREN_TAB_TEXT_URL, NULL, 0);
 char* url = malloc(needed);
-Wren_CopyTabURL(tab, url, needed);
+Wren_CopyTabText(tab, WREN_TAB_TEXT_URL, url, needed);
 ```
 
-Images come out the same way, as PNG bytes. The function returns the PNG's size, and copies it only if the buffer is large enough. 0 means there is no image.
+When something has more than one string, one call copies them all, and an enum says which. A tab's title, URL and media texts come from `Wren_CopyTabText`, with `WREN_TAB_TEXT_TITLE` and the other kinds of `WrenTabText`. A download, a popover request and a Profile's bookmarks work the same way. A kind that doesn't apply, such as a card's name on a passwords prompt, copies "" and returns 1, and so does a value outside the enum.
+
+Images come out the same way, as PNG bytes. The function returns the PNG's size, and copies it only if your buffer is big enough. 0 means there's no image.
 
 ### Results
 
-Functions that can fail return a `WrenResult`. `WREN_OK` is 0. `Wren.h` explains the other values beside the enum.
+Functions that can fail return a `WrenResult`, where `WREN_OK` is 0. `Wren.h` explains each other value beside the enum.
 
-### State structs and changes
+### State and changes
 
-State is read into a struct you supply, as with `Wren_GetTabState` and `Wren_GetSidePanelState`. `on_changed` says what to read again. Each `WrenChange` has a kind, and for a tab, the bits of `tab_fields` that changed. Records are valid only during the call.
+You read state into a struct you supply, as with `Wren_GetTabState` and `Wren_GetSidePanelState`. `on_changed` tells you what to read again. Each `WrenChange` has a kind, and for a tab, the bits of `tab_fields` that changed. The records are valid only during the call.
 
-### The API version
+### Versions
 
-Set `WrenStartup.api_version` to `WREN_API_VERSION`, and `WrenStartup.unstable_ui_version` to `WREN_UNSTABLE_UI_VERSION`. `Wren_Main` returns `WREN_EXIT_API_MISMATCH` if either differs from the framework's. That happens when an app is bundled with a release other than the one it was compiled against. What each version promises is in [compatibility](compatibility.md).
+Set `WrenStartup.api_version` to `WREN_API_VERSION`, and `WrenStartup.unstable_ui_version` to `WREN_UNSTABLE_UI_VERSION`. If either differs from the framework's, `Wren_Main` returns `WREN_EXIT_API_MISMATCH`, which happens when an app is bundled with a different release from the one it was compiled against. [Compatibility](compatibility.md) says what each version promises.
 
-## Binding another language
+## Wrapping it in another language
 
-The API is meant to be bound. It has plain C types, no macros that matter beyond constants, callbacks with a `void* context`, and no ownership rules beyond the two above.
+The C API is designed to be wrapped. It uses plain C types, has no macros that matter beyond constants, gives every callback a `void* context`, and has no ownership rules beyond the two above.
 
-A release has two bindings, which show the patterns. They are the Swift API, in `wren-swift` under `Sources/Wren`, and the Rust crate, in `wren-rust`. The crate's `wren::sys` is the C API as bindgen made it. Both bindings use the same patterns:
+The Swift SDK, in a release's `wren-swift` under `Sources/Wren`, and the Rust SDK, in `wren-rust`, show how. The Rust SDK's `wren::sys` is the C API as bindgen made it. Both follow the same patterns:
 
 - a class or an owner for each counted handle
-- a value for each ID
+- a value type for each ID
 - a closure boxed as a callback's context
-- `Copy` functions wrapped as strings and data
+- `Copy` functions wrapped to return strings and data
 
-C, Swift and Rust are supported.
+C, Swift and Rust are the supported languages.

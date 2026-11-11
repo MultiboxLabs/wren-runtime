@@ -1,31 +1,21 @@
 # Messages between a page and your app
 
-The page of a [web view](web-views.md) and your app's native code can call each other, as a page and the main process do in Electron with `ipcRenderer` and `ipcMain`. The page has one object, `wren`. Your app has a handler and a way to send. Wren carries the messages and defines none of them. Every name is yours. Besides the channel, the page has one function of Wren's own, [`wren.pathForFile`](#files-the-user-drops).
+A [web view](web-views.md)'s page and your app's native code can call each other, much as `ipcRenderer` and `ipcMain` do in Electron. The page calls your app with `wren.invoke` and hears from it with `wren.on`. Your app answers with handlers, and talks to the page with `send`. Every message's name is yours, and Wren Runtime carries the messages without reading them.
 
-The API is in the "Messages" section of [`WrenWebView.h`](../include/WrenWebView.h). What works in this release is in [This release](this-release.md). The [table at the end](#the-names-in-swift-rust-and-c) gives each name in Swift, Rust and C.
+The code here is in Swift and Rust for your app, and TypeScript for the page. The [table at the end](#the-names-in-swift-rust-and-c) gives each name in Swift, Rust and C.
 
-## For pages you trust, and no others
+## Only for your own pages
 
-This channel is for your own UI, pages you wrote and serve yourself. A page that has `wren` can call every handler you set, with any value. So it has whatever power those handlers give. Wren checks where a call comes from, but it cannot check what the call means.
+Messages are for your own UI, pages you wrote and serve yourself. A page with `wren` can call every handler you set, with any value, so it has whatever power those handlers give. Wren Runtime checks where a call comes from, but it can't check what the call means.
 
-- Give `messages` only to a view that shows your own pages. A view that shows a website has no `wren` on that site, and should not be made with `messages` at all.
-- Do not use it to give websites, extensions or other people's content a way to reach your app. Wren has no channel for untrusted pages yet, as [What is missing](#what-is-missing) says. Until it has, such content gets Chromium's own mechanisms and nothing of yours.
+- **Give `messages` only to a web view that shows your own pages.** Pages on [your URL schemes](schemes.md) have `wren`, and websites the web view goes to don't.
+- **Don't use messages to let websites, extensions or other people's content reach your app.** Wren Runtime has no channel for pages you don't trust yet.
 
-## Which pages have it
+While you develop, a web view's [trusted development server](web-views.md#trusting-a-development-server) gets `wren` too. List nothing there in a build you ship.
 
-By default, only pages on [your own schemes](schemes.md), in a view made with `messages`, have `wren`. The one setting that widens this is the view's list of [trusted origins](web-views.md#trusted-origins). It is for a development server that serves your UI while you build it:
+## Your app's side
 
-|  | Where |
-| --- | --- |
-| Swift | `WebView(profile:url:messages: true, trustedOrigins: ["http://localhost:5173"])` |
-| Rust | `WebViewOptions { messages: true, trusted_origins: vec!["http://localhost:5173".into()], .. }` |
-| C | `WrenWebViewOptions.messages`, with `trusted_origins` and `trusted_origin_count` |
-
-Every page that origin serves, in that view, then has `wren`. So list nothing in a build you ship.
-
-## The app's side
-
-Make the view with `messages`, then say what each call does:
+Make the web view with `messages`, then say what each call does:
 
 ```swift
 struct TabInfo: Encodable { let id: Int32; let title: String }
@@ -37,14 +27,16 @@ func tabList() -> [TabInfo] {
     browser.tabs.map { TabInfo(id: $0.id, title: $0.title) }
 }
 
-// A call from the page. What the closure returns is the page's answer; a
+// A call from the page. What the closure returns is the page's answer, and a
 // throw fails the call. It may be async.
 try view.handle("tabs.list") { () -> [TabInfo] in tabList() }
 try view.handle("tabs.navigate") { (call: Navigation) -> Void in
-    guard let tab = browser.tabs.first(where: { $0.id == call.id }) else { throw NoSuchTab() }
+    guard let tab = browser.tabs.first(where: { $0.id == call.id }) else {
+        throw WrenError.tabUnavailable
+    }
     try tab.navigate(to: call.url)
 }
-try view.handle("tabs.new") { try browser.newTab() }  // no value, no answer: null
+try view.handle("tabs.new") { try browser.newTab() }  // no value, and null for an answer
 
 // A message to the page, here from the app's own change callback.
 delegate.changed = { changes in
@@ -54,38 +46,47 @@ delegate.changed = { changes in
 }
 ```
 
-The same app in Rust, with serde for the values:
+The same in Rust, with serde for the values:
 
 ```rust
 #[derive(Serialize)]
-struct TabInfo { id: i32, title: String }
+struct TabInfo {
+    id: i32,
+    title: String,
+}
 #[derive(Deserialize)]
-struct Navigation { id: i32, url: String }
+struct Navigation {
+    id: i32,
+    url: String,
+}
+
+fn tab_list(browser: &Browser) -> Vec<TabInfo> {
+    browser.tabs().into_iter().map(|tab| TabInfo { id: tab.id(), title: tab.title() }).collect()
+}
 
 let view = WebView::new(
     &profile,
     "app://ui/window.html",
-    &WebViewOptions { messages: true, ..Default::default() },
+    &WebViewOptions { messages: true, ..WebViewOptions::default() },
 )
 .expect("a web view");
 
-// What the closure returns is the page's answer; an Err fails the call.
-view.handle("tabs.list", move |()| Ok::<_, Error>(tab_list(&browser)))?;
+// What the closure returns is the page's answer, and an Err fails the call.
+let listed = browser.clone();
+view.handle("tabs.list", move |()| Ok::<_, Error>(tab_list(&listed)))?;
 view.handle("tabs.navigate", move |call: Navigation| {
     BrowserTab::from_id(mt, call.id).ok_or(Error::TabUnavailable)?.navigate(&call.url)
 })?;
 
-// In App::changed:
-let _ = view.send("tabs.changed", &tab_list(&browser));
+// A message to the page, such as from App::changed.
+view.send("tabs.changed", &tab_list(&browser))?;
 ```
 
-`handle_call` takes a `PageCall` to answer later instead, and `set_call_handler` gets every call with no handler of its own.
-
-In C there is one handler for the view, which gets every call with its name. The calls are `Wren_SetPageCallHandler`, `Wren_CopyPageCallName` and `Wren_CopyPageCallValue`, then `Wren_AnswerPageCall` or `Wren_FailPageCall`, and `Wren_SendPageMessage` to send. Values are JSON text there, for your own parser.
+In Rust, `handle_call` gives you a `PageCall` to answer later instead, and `set_call_handler` gets every call that has no handler of its own.
 
 ## The page's side
 
-`wren` is there before the page's first script runs. There is nothing to load or import:
+`wren` is there before the page's first script runs, with nothing to load or import:
 
 ```ts
 type Tab = { id: number; title: string };
@@ -103,19 +104,19 @@ try {
 }
 ```
 
-That is all of it:
+That's all of it:
 
-| The page calls | It does |
+| The page calls | What it does |
 | --- | --- |
-| `wren.invoke(name, value?)` | Calls the app. Returns a promise of its answer, which rejects with an `Error` if the handler fails the call or there is none. |
-| `wren.on(name, listener)` | Hears the app's messages of that name. Returns a function that stops listening. |
-| `wren.pathForFile(file)` | Gives the path on disk of a file the user dropped on the page. See [below](#files-the-user-drops). |
+| `wren.invoke(name, value?)` | Calls your app, and returns a promise of its answer. The promise rejects with an `Error` if the handler fails, or if there's no handler for the name. |
+| `wren.on(name, listener)` | Listens for your app's messages with that name, and returns a function that stops listening. |
+| `wren.pathForFile(file)` | Gives the path on disk of a file someone dropped on the page. See [Files dropped on the page](#files-dropped-on-the-page). |
 
-For TypeScript, a release has the types in `page/wren.d.ts`. Add it to your page's project, with the DOM in its `lib`. It also types the elements Wren gives a page, `<wren-view>` (`HTMLWrenViewElement`) and a mark's `name`, for the DOM. A JSX library keeps its own list of elements. Declare `wren-view` there, typed by `HTMLWrenViewElement`.
+A release has TypeScript types for all of it in `page/wren.d.ts`. Add the file to your page's project, with the DOM in its `lib`. It also types `<wren-view>`, as `HTMLWrenViewElement`, and the `name` attribute of [anchors](anchors-in-web-views.md). A JSX library keeps its own list of elements, so declare `wren-view` there too, typed as `HTMLWrenViewElement`.
 
-## Files the user drops
+## Files dropped on the page
 
-A page gets a file dropped on it from Finder or another app as a DOM `File`, which has a name and contents but no path. `wren.pathForFile` gives the path. So your app can do with the file what Chrome does, and open it in a tab:
+A file dropped on a page from Finder or another app arrives as a DOM `File`, which has a name and contents but no path. `wren.pathForFile` gives you the path, so your app can do what Chrome does with a dropped file and open it in a tab:
 
 ```ts
 strip.addEventListener("dragover", (event) => event.preventDefault());
@@ -128,37 +129,40 @@ strip.addEventListener("drop", (event) => {
 });
 ```
 
-- **It is synchronous,** and needs no handler in your app.
-- **It returns `null` for a file that is not on disk,** such as a `File` or `Blob` the page made or fetched. Anything that is not a `Blob` throws a `TypeError`.
-- **Wren opens nothing.** Your app makes the `file://` URL and decides what opens. In Swift that is `URL(fileURLWithPath:)`, and in Rust `url::Url::from_file_path`. Chrome opens only what it can show. A type Chromium cannot show becomes a download.
-- **It works only where `wren` is.** A website, in a web view or a tab, never learns a path, as in Chrome.
-- **A drop the page leaves opens nothing** in a web view. The page leaves a drop when it does not call `preventDefault`.
+- **It answers at once,** and needs no handler in your app.
+- **It returns `null` for a file that isn't on disk,** such as a `Blob` the page made or fetched. Anything that isn't a `Blob` throws a `TypeError`.
+- **Your app decides what opens.** Make the `file://` URL yourself, such as with `URL(fileURLWithPath:)` in Swift or `url::Url::from_file_path` in Rust. Chrome opens only what it can show, and a type Chromium can't show becomes a download.
+- **Only pages with `wren` get paths.** A website never learns a path, in a web view or a tab, as in Chrome.
+- **A drop the page doesn't handle opens nothing.** A page handles a drop by calling `preventDefault`.
 
-## Rules
+## Things to know
 
-- **Values are what JSON holds:** objects, arrays, strings, numbers, booleans and null. You pass and get ordinary values on both sides. A `Date` arrives as a string. A `Map`, binary data, or a value over 1 MB does not cross. Serve bytes from [your scheme](schemes.md) instead.
-- **Only the view's own page has `wren`.** It belongs to the main frame of a view made with `messages`, while that page is on one of your schemes or a listed origin. A tab, even on your scheme, has none. Neither does a frame inside the page, or a view that has gone anywhere else. There, `typeof wren === "undefined"`.
-- **Treat a call's value as input.** It comes from a page. Check an ID before acting on it, as a scheme's handler checks a path. The page is yours, but a script injected into it calls with the same right.
-- **Answer every call once,** in the handler or later. In Swift and Rust, returning or throwing is the answer.
-- **A call ends with its page.** If the page reloads or goes elsewhere, or the view is destroyed, before you answer, the call is over. Answering then throws `.closed`, and the page's promise never settles.
-- **Nothing is kept for a page that is not there.** `send` throws `.closed` while the view's page is still loading or has no channel. A page that has called you is there. So have the page ask first, and send from then on.
-- **Handlers run from the event loop,** on the main thread, outside Chromium's own notifications. So they may call any of Wren's API.
+- **Values are what JSON can hold.** That's objects, arrays, strings, numbers, booleans and null. A `Date` arrives as a string. A `Map`, binary data or a value over 1 MB can't be sent, so serve bytes from [your scheme](schemes.md) instead.
+- **Only the web view's own page has `wren`.** A tab doesn't, even on your scheme, and neither does a frame inside your page. There, `typeof wren === "undefined"`.
+- **Check what a call sends.** It comes from a page. The page is yours, but a script injected into it would call with the same rights. Check an ID before you act on it, as a scheme handler checks a path.
+- **Answer every call once,** now or later. In Swift and Rust, returning or throwing is the answer.
+- **A call ends with its page.** If the page reloads or navigates, or the web view ends, before you answer, the call is over. Answering then throws `.closed`, and the page's promise never settles.
+- **`send` needs a page to receive it.** While the page is still loading, `send` throws `.closed`, and nothing is kept for later. So have the page call your app first, and send from then on.
+- **Messages and answers arrive in the order you send them.** A page that Chromium has frozen gets them once it runs again, still in that order, and none of them runs its script before then.
+- **Handlers run from the event loop,** on the main thread, so they can call anything in Wren Runtime.
 
-## What is missing
+## Not available yet
 
-- **A channel for pages you do not trust.** Websites, extensions and other content that should reach a browser's own features need a different, narrower mechanism. It would be built on what Chromium already has for them, such as extension APIs. It is not designed or planned yet.
-- **`wren` in a tab.** A tab on your scheme, such as a New Tab page or a settings page, has no `wren`. It can still `fetch()` your scheme.
-- **Synchronous calls and binary values.** Calls are asynchronous only, and values are JSON.
-- **Page answers to Chromium.** A page cannot answer what Chromium asks your app inside its own call, such as a popover request or full screen. Answer in your app, then tell the page.
+- **A channel for pages you don't trust.** Websites, extensions and other content that should reach a browser's own features need a narrower mechanism. It would be built on what Chromium already has for them, such as extension APIs, but it isn't designed yet.
+- **`wren` in a tab.** A tab on your scheme, such as a New Tab page or a settings page, has no `wren`. It can still `fetch()` from your scheme.
+- **Synchronous calls and binary values.** Calls are only asynchronous, and values are only JSON.
+- **Answering Chromium from a page.** A page can't answer what Chromium asks inside its own call, such as a popover request or full screen. Answer in your app, then tell the page.
 
 ## The names in Swift, Rust and C
+
+In C, one handler gets every call to a web view, with its name, and values are JSON text for your own parser.
 
 | Swift | Rust | C |
 | --- | --- | --- |
 | `messages: true` | `WebViewOptions::messages` | `WrenWebViewOptions.messages` |
-| `view.handle(_:)` | `WebView::handle`, `handle_call` | `Wren_SetPageCallHandler` |
+| `view.handle` | `WebView::handle`, `WebView::handle_call` | `Wren_SetPageCallHandler` |
 | `PageCall` | `PageCall` | `WrenPageCall` |
-| `call.name`, `call.json` | `PageCall::name`, `json` | `Wren_CopyPageCallName`, `Wren_CopyPageCallValue` |
-| `call.answer` | `PageCall::answer`, `answer_json` | `Wren_AnswerPageCall` |
+| `call.name`, `call.json` | `PageCall::name`, `PageCall::json` | `Wren_CopyPageCallText` |
+| `call.answer` | `PageCall::answer`, `PageCall::answer_json` | `Wren_AnswerPageCall` |
 | `call.fail` | `PageCall::fail` | `Wren_FailPageCall` |
-| `view.send` | `WebView::send`, `send_json` | `Wren_SendPageMessage` |
+| `view.send` | `WebView::send`, `WebView::send_json` | `Wren_SendPageMessage` |

@@ -112,17 +112,23 @@ WREN_API size_t Wren_GetBookmarkChildCount(WrenProfile* profile,
 WREN_API WrenBookmarkID Wren_GetBookmarkChildAt(WrenProfile* profile,
                                                 WrenBookmarkID folder,
                                                 size_t index);
-// Copies the item's title as Chrome shows it. For the four folders that is
-// Chromium's own name for them.
-WREN_API size_t Wren_CopyBookmarkItemTitle(WrenProfile* profile,
-                                           WrenBookmarkID item,
-                                           char* buffer,
-                                           size_t size);
-// Copies a bookmark's URL. "" for a folder.
-WREN_API size_t Wren_CopyBookmarkItemURL(WrenProfile* profile,
-                                         WrenBookmarkID item,
-                                         char* buffer,
-                                         size_t size);
+// Which of an item's strings Wren_CopyBookmarkItemText copies.
+typedef enum WrenBookmarkItemText {
+  // The item's title as Chrome shows it. For the four folders that is
+  // Chromium's own name for them.
+  WREN_BOOKMARK_ITEM_TEXT_TITLE = 0,
+  // A bookmark's URL. "" for a folder.
+  WREN_BOOKMARK_ITEM_TEXT_URL = 1,
+} WrenBookmarkItemText;
+
+// Copies one of the item's strings, in UTF-8. Returns the length needed,
+// including the NUL. An item the Profile does not have copies "", and so does
+// a value outside WrenBookmarkItemText.
+WREN_API size_t Wren_CopyBookmarkItemText(WrenProfile* profile,
+                                          WrenBookmarkID item,
+                                          WrenBookmarkItemText text,
+                                          char* buffer,
+                                          size_t size);
 // Copies a bookmark's favicon as a PNG into `buffer` if it fits, and returns
 // the PNG's size in bytes, as Wren_CopyTabFaviconPNG (WrenTabs.h) does.
 //
