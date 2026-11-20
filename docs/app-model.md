@@ -105,7 +105,7 @@ Your app's callbacks are fields of `AppDelegate`. Only `browserOpened` is requir
 | `quitCommitted` | A quit can no longer be cancelled. It runs once, before any Browser closes. |
 | `willQuit` | The app is about to quit. It runs once, after every Browser has closed. |
 | `reopen` | Someone clicked the Dock icon while the app was running. |
-| `openURLs` | macOS asked the app to open URLs or files. Wren Runtime opens nothing itself. |
+| `openURLs` | macOS asked the app to open URLs or files. Wren Runtime opens nothing itself. The request says where they came from: an app on the Mac, Handoff, or unknown. |
 | `focusLocationBar` | Chromium wants your address field focused, such as on the New Tab page. |
 | `windowRequest` | Chromium asks for a window to move, resize, minimise, zoom or restore. You can do it, adapt it or ignore it. |
 | `popover` | Chromium is about to open a popover. You say whether it shows Chromium's, yours or none. |

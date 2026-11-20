@@ -22,6 +22,10 @@
 // - The app can tag each Browser with a short string. Chromium keeps the tag
 //   with the Browser in the session and in the list of closed windows.
 // - Each tab has a persistent ID, which a restored tab has again.
+// - A launch keeps the last session's session cookies and sessionStorage for a
+//   Profile set to keep them (Wren_SetProfileKeepsSessionData), and for every
+//   Profile after a relaunch, as Chrome does. Otherwise it deletes them as the
+//   Profile loads, before the app can restore.
 //
 // An off-the-record Profile has no last session and no closed tabs.
 
@@ -46,8 +50,9 @@ typedef struct WrenSessionState {
   bool crashed;
   // True if the last session ended in a relaunch: Chromium's own, from
   // Wren_Relaunch or About's Relaunch, or one handed to the app
-  // (Wren_LeaveRelaunchToApp). Chrome restores after a relaunch. The same for
-  // every Profile.
+  // (Wren_LeaveRelaunchToApp). Chrome restores after a relaunch, and every
+  // Profile keeps its session data for the app's restore. The same for every
+  // Profile.
   bool relaunched;
 } WrenSessionState;
 
@@ -88,6 +93,34 @@ typedef void (*WrenRestoreCallback)(void* context,
 WREN_API void Wren_RestoreLastSession(WrenProfile* profile,
                                       WrenRestoreCallback callback,
                                       void* context);
+
+// --- Session data -----------------------------------------------------------
+//
+// A Profile's session data is its session cookies, the ones with no expiry,
+// and its pages' sessionStorage. A Profile set to keep it keeps the last
+// session's for the app's restore, as Chrome does when it continues where it
+// left off. It is Chrome's own setting, which chrome://settings/onStartup also
+// changes, and WREN_CHANGE_PROFILES reports a change from the app or from
+// Chromium's pages. The setting restores nothing by itself. A Profile reads it
+// as it loads, so a change applies from the Profile's next load.
+//
+// With the setting on, closing the Profile's last window keeps the data of the
+// sites the user set to clear on exit, as Chrome does. It deletes only what
+// policy marks to clear.
+
+// Turns the setting on or off, as chrome://settings/onStartup does: on chooses
+// Continue where you left off, and off chooses the New Tab page when the
+// setting is on. The list of pages chrome://settings keeps for Open a specific
+// set of pages stays as it is. Returns
+// WREN_ERROR_INVALID_ARGUMENT for an off-the-record or ephemeral Profile,
+// WREN_ERROR_NOT_ALLOWED when policy sets it, and WREN_ERROR_CLOSED once the
+// Profile has closed.
+WREN_API WrenResult Wren_SetProfileKeepsSessionData(WrenProfile* profile,
+                                                    bool on);
+// Whether the setting is on, by the app or in Chromium's pages. It reads the
+// setting, even after a relaunch. Returns false if the Profile has closed, or
+// is not persistent.
+WREN_API bool Wren_GetProfileKeepsSessionData(WrenProfile* profile);
 
 // --- A Browser's tag --------------------------------------------------------
 //

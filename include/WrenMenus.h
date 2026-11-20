@@ -9,7 +9,8 @@
 // array of its own. Wren copies the arrays and shows the menu natively. When
 // the user chooses one of the app's items, Wren reports the ID the app gave
 // it. A main menu may also hold the system's items (ROLE) and Chromium's
-// commands (CHROMIUM).
+// commands (CHROMIUM). This header has the main menu and the Dock menu.
+// Context menus, which take the same items, are in WrenContextMenus.h.
 
 #ifndef WREN_PUBLIC_WREN_MENUS_H_
 #define WREN_PUBLIC_WREN_MENUS_H_
@@ -33,6 +34,10 @@ typedef enum WrenMenuItemKind {
   // the key window. Wren enables it when Chrome would enable its own. With no
   // Browser in the key window, it is disabled.
   WREN_MENU_ITEM_CHROMIUM = 4,
+  // Wren_ShowContextMenu for a request of Chromium's only. One of the
+  // request's items, named in `id`, with Chromium's command, state, icon and
+  // submenu (WrenContextMenus.h).
+  WREN_MENU_ITEM_PAGE = 5,
 } WrenMenuItemKind;
 
 // What a ROLE item does, or which of the system's menus a SUBMENU is.
@@ -155,12 +160,14 @@ typedef enum WrenMenuModifier {
 typedef struct WrenMenuItem {
   WrenMenuItemKind kind;
   // Required for APP. 1 to 256 bytes, and unique in the menu. Wren reports it
-  // back, as given, when the user chooses the item.
+  // back, as given, when the user chooses the item. For PAGE, the name of
+  // Chromium's item (WrenContextMenus.h).
   const char* id;
-  // Required for APP and SUBMENU, and shown as given. For ROLE, CHROMIUM and
-  // a SUBMENU with a role, NULL gives the label the system's or Chrome's own
-  // menu uses, in the user's language.
+  // Required for APP and SUBMENU, and shown as given. For ROLE, CHROMIUM,
+  // PAGE and a SUBMENU with a role, NULL gives the label the system's,
+  // Chrome's own or Chromium's menu uses, in the user's language.
   const char* label;
+
   bool disabled;
   // APP only. Shows a check mark.
   bool checked;
@@ -191,50 +198,6 @@ typedef struct WrenMenuItem {
   WrenChromiumCommand command;
 } WrenMenuItem;
 
-// --- Context menus ----------------------------------------------------------
-
-// Runs when a context menu has closed. `chosen_id` is the ID of the APP item
-// the user chose, valid only during the call. It is NULL if the user chose
-// nothing: they dismissed the menu, another context menu replaced it, or its
-// page went away.
-typedef void (*WrenMenuCallback)(void* context, const char* chosen_id);
-
-// Shows `items` as a native context menu at (x, y), in points from the top
-// left of `view`.
-//
-// `view` is one of the app's views in a window, an NSView on macOS. It may be
-// a web view's view (Wren_GetWebViewNativeView), a tab's view
-// (Wren_GetTabView), or a view of the app's own. Over a web view's or a tab's
-// view, the menu belongs to the page, as Chrome's page menu does. So the
-// system's own items, such as Services, act on the page. A page's clientX and
-// clientY are the point at 100% zoom.
-//
-// The call returns at once, and the menu opens from the event loop.
-// `callback` runs once, from the event loop, after the menu has closed and
-// after Wren has reported the chosen item, if any.
-//
-// Only one context menu shows at a time. A second call closes the first, and
-// the first one's callback reports NULL. If the web view is destroyed or the
-// tab closes while the menu is open, the menu closes and reports NULL.
-//
-// Returns WREN_ERROR_INVALID_ARGUMENT, and `callback` does not run, for any of
-// these:
-//
-// - a view in no window, or no items
-// - an item that breaks a rule above, or an unknown kind, key or modifier
-// - submenus nested more than 4 deep, or more than 1,000 items
-// - a ROLE or CHROMIUM item, or a SUBMENU with a role, which belong in the
-//   main menu only
-//
-// Returns WREN_ERROR_NOT_ALLOWED inside on_popover or on_fullscreen.
-WREN_API WrenResult Wren_ShowContextMenu(void* view,
-                                         const WrenMenuItem* items,
-                                         size_t count,
-                                         double x,
-                                         double y,
-                                         WrenMenuCallback callback,
-                                         void* context);
-
 // --- The main menu ----------------------------------------------------------
 
 // Makes `items` the app's main menu, the menu bar on macOS. It replaces the
@@ -249,7 +212,8 @@ WREN_API WrenResult Wren_ShowContextMenu(void* view,
 //
 // Returns WREN_ERROR_INVALID_ARGUMENT for an item at the top that is not a
 // SUBMENU, or an item that breaks a rule of WrenMenuItem or
-// Wren_ShowContextMenu. The menu then stays as it was. Returns
+// Wren_ShowContextMenu (WrenContextMenus.h), or a PAGE item. The menu then
+// stays as it was. Returns
 // WREN_ERROR_NOT_ALLOWED inside on_popover or on_fullscreen.
 WREN_API WrenResult Wren_SetMainMenu(const WrenMenuItem* items, size_t count);
 
@@ -280,7 +244,7 @@ WREN_API WrenResult Wren_UpdateMainMenuItem(const char* id,
 // window activates the app itself.
 //
 // Returns WREN_ERROR_INVALID_ARGUMENT, and the menu stays as it was, for a
-// SUBMENU, ROLE or CHROMIUM item, an APP item that is disabled, checked,
+// SUBMENU, ROLE, CHROMIUM or PAGE item, an APP item that is disabled, checked,
 // hidden or has a key, or an item that breaks a rule of WrenMenuItem. Returns
 // WREN_ERROR_NOT_ALLOWED inside on_popover or on_fullscreen.
 WREN_API WrenResult Wren_SetDockMenu(const WrenMenuItem* items, size_t count);

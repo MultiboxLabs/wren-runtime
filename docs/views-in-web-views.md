@@ -51,11 +51,24 @@ Wren Runtime keeps the element filled. Your page has nothing to do when DevTools
 
 ## Switching tabs
 
-To show another tab, change the element's `data-id`, or keep an element for each tab and show one at a time. A tab's element switches at once, and stays empty until the new page has drawn. A side panel's element keeps the old panel showing until the new one has drawn.
+Keep an element for every tab of the window, and give the background ones the `hidden` attribute. A hidden element keeps its tab's page, so a switch only changes which elements are hidden, and the tab you switch to shows at once, as it last drew. Chromium treats a tab in a hidden element as Chrome treats a background tab: its timers slow, it may be frozen or discarded, its media plays on, and it doesn't take clicks.
 
-A split needs no element of its own. Show both tabs' elements, with a divider of your own between them. A click or a key in the side that isn't active makes it the active tab, as in a native window, and you hear about it as a change.
+`hidden` doesn't take the element out of your layout or change its size, so place and size every element yourself, hidden or not, as a native app sets a tab view's frame. The tab's page is laid out at its element's size, so a tab you switch to never has to lay itself out again. Stack the elements in one place, such as in one grid cell, and keep each at the size its tab has when shown:
 
-`tab.focus()` gives the keyboard to the tab inside the web view, once the element has the tab's page. The page arrives a moment after your page asks for it. Then the tab's `state().inElement` turns true, and `changed` reports `.inElement`, so give a newly active tab the keyboard at that change.
+```css
+.pages {
+  display: grid;
+}
+.pages > wren-view {
+  grid-area: 1 / 1;
+}
+```
+
+A split needs no element of its own. Show both tabs' elements side by side, with a divider of your own between them, and keep them at their halves while the split is hidden. A click or a key in the side that isn't active makes it the active tab, as in a native window, and you hear about it as a change.
+
+`tab.focus()` gives the keyboard to the tab inside the web view. Give the newly active tab the keyboard when it becomes active, as Chrome does. A tab that's already in its element has `state().inElement` true, and `focus()` reaches it at once. A tab whose element is new gets its page a moment after your page asks for it. Its `state().inElement` then turns true, and `changed` reports `.inElement`, so give it the keyboard at that change.
+
+You can also change one element's `data-id` to show another tab. That moves the tab's page out of the element and the other tab's in, which costs more. The page you show stays empty until it has drawn, and its canvases stay blank until the page draws to them again, which some pages do only on input. A side panel's element works this way, and keeps the old panel showing until the new one has drawn.
 
 ## The pointer over a view
 
@@ -75,6 +88,7 @@ Your page misses one case. When the pointer leaves the web view straight from th
 ## Things to know
 
 - **A page is in one place at a time.** While an element shows a tab, `tab.view` is empty, and the same goes for a side panel. When the element goes, or the web view ends, the pages go back to their native views.
+- **A hidden element still shows its tab, to Chromium.** The tab's page stays in it, hidden. To send the page back to `tab.view`, remove the element or clear its `data-id`.
 - **One element for each ID.** A second element with the same `data-id` takes the tab from the first.
 - **An element with nothing to show stays empty,** such as for a closed tab, a closed panel, or an ID that names nothing.
 - **The tab is still a tab.** Its ID, history, session and changes stay as they were, and so does everything you do to it through its Browser. Your page and the tab's page can't script each other.

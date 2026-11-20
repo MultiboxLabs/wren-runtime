@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: Wren Runtime release
-      description: The `wren` value in your app's `wren-app.json`, such as 0.5.0.
+      description: The `wren` value in your app's `wren-app.json`, such as 0.6.0.
     validations:
       required: true
   - type: input

@@ -67,6 +67,7 @@ WREN_API size_t Wren_CopyTabText(WrenTabID tab,
 typedef struct WrenTabOptions {
   // Where to insert the tab. -1, or an index past the end, adds it at the end.
   int index;
+
   bool activate;
 } WrenTabOptions;
 
@@ -77,6 +78,34 @@ WREN_API WrenResult Wren_AddTab(WrenBrowser* browser,
                                 const char* url,
                                 const WrenTabOptions* options,
                                 WrenTabID* tab);
+
+// Duplicates the tab, as Chrome's Duplicate Tab command does for the active
+// tab. The copy is a new tab with a new ID. It goes after the original. It
+// becomes the active tab if `activate` is true, and stays in the background
+// otherwise. It has the original's history, pinning and group, and loads its
+// page again. If `duplicate` is not NULL, it receives the copy's ID.
+//
+// The copy is in no split. The copy of a split's first tab goes between the
+// split's two tabs, and the split ends, as with Chrome's command. The copy of
+// a split's second tab goes after the split.
+//
+// A tab of a Browser without a tab strip, such as a popup or an app's
+// window, is copied to a new Browser of the same type, which reaches
+// on_browser_opened. The copy is that Browser's only tab, so it is active
+// whatever `activate` is.
+//
+// The copy has none of the app's settings for the original, such as
+// Wren_SetTabSessionExcluded, Wren_SetTabIgnoresInput and
+// Wren_SetTabWatchesNavigations. The app sets them on the copy if it needs
+// them. The copy's opened_by is WREN_NO_TAB.
+//
+// Returns WREN_ERROR_TAB_UNAVAILABLE if no open tab has this ID. Returns
+// WREN_ERROR_NOT_ALLOWED for a tab of a WREN_BROWSER_APP_POPUP,
+// WREN_BROWSER_PICTURE_IN_PICTURE or WREN_BROWSER_DEVTOOLS Browser, and
+// inside on_popover.
+WREN_API WrenResult Wren_DuplicateTab(WrenTabID tab,
+                                      bool activate,
+                                      WrenTabID* duplicate);
 
 // Runs Chromium's New Tab command, as Cmd-T does in Chrome. It opens a tab in
 // front, showing the New Tab page or an extension's replacement for it. A
@@ -89,14 +118,35 @@ WREN_API WrenResult Wren_ActivateTab(WrenTabID tab);
 // (WrenTabState.may_ask_before_close). When
 // a Browser's last tab closes, the Browser closes too (WrenBrowser.h).
 // Nothing reports whether the page kept the tab. Wren_CloseTabs does.
+// Wren_CloseTabWithoutAsking closes a tab without asking its page.
 WREN_API WrenResult Wren_CloseTab(WrenTabID tab);
+// Closes the tab without asking its page, as Chrome closes a tab whose page
+// has agreed in beforeunload. The page runs its pagehide, and its unload
+// where its permissions policy allows unload, which by default an http or
+// https page's does not. Chromium waits up to half a second for them. Reopen
+// Closed Tab can bring the tab back, as after Wren_CloseTab. If the page is
+// showing its beforeunload dialog, the dialog closes with the tab.
+//
+// It is for a tab the app closes by itself, such as one it no longer needs.
+// When the user closes a tab, call Wren_CloseTab or Wren_CloseTabs, so the
+// page can ask.
+//
+// The tab closes from the event loop, and WREN_CHANGE_TABS reports it. When a
+// Browser's last tab closes, the Browser closes too.
+//
+// Returns WREN_ERROR_TAB_UNAVAILABLE if no open tab has this ID. Returns
+// WREN_ERROR_NOT_ALLOWED if the tab is in a Wren_CloseTabs request or cannot
+// be closed, if its Browser is in a Wren_CloseBrowsers request or closing,
+// while a quit is under way, and inside on_popover.
+WREN_API WrenResult Wren_CloseTabWithoutAsking(WrenTabID tab);
 // Closes `count` tabs, all or none, in any Browsers. `callback` gets the
 // answer, from the event loop.
 //
 // Each tab's page may ask in beforeunload, one page at a time, in the order
 // given. Only once every page has agreed do the tabs close. Each page then
-// runs its pagehide and unload, and Reopen Closed Tab can bring each tab
-// back, as after Wren_CloseTab.
+// runs its pagehide, and its unload where its permissions policy allows
+// unload, as for Wren_CloseTabWithoutAsking. Reopen Closed Tab can bring each
+// tab back, as after Wren_CloseTab.
 //
 // - WREN_OK comes once every tab has left its Browser.
 // - WREN_ERROR_CANCELLED means a page kept them. Every tab stays open, none
@@ -271,7 +321,20 @@ typedef struct WrenTabMedia {
 } WrenTabMedia;
 
 typedef struct WrenTabState {
+  // True while any frame of the page loads, an iframe's included, also after
+  // the page itself has finished. Draw a spinner from shows_loading instead.
   bool loading;
+  // True while Chrome shows the tab's spinner and its Stop button: while the
+  // page itself loads, from the start of a navigation to a new document until
+  // the page's load event. An iframe that loads later does not count, and
+  // neither does a change of the URL's fragment.
+  // WREN_TAB_FIELD_SHOWS_LOADING reports a change.
+  bool shows_loading;
+  // How far the page's load has got, as a whole percent from 1 to 100, while
+  // shows_loading is true, and 0 otherwise. Chromium starts it at 10 when a
+  // navigation starts. WREN_TAB_FIELD_LOAD_PROGRESS reports a change.
+  int load_progress;
+
   bool can_go_back;
   bool can_go_forward;
   bool pinned;
@@ -383,6 +446,7 @@ typedef struct WrenCaptureOptions {
   // scale.
   int max_width;
   int max_height;
+
   WrenImageFormat format;
   // For JPEG, 1 to 100. 0 means 80. PNG ignores it.
   int quality;
@@ -832,6 +896,7 @@ typedef enum WrenSplitLayout {
 typedef struct WrenSplitState {
   // The first tab, on the left or at the top, then the second.
   WrenTabID tabs[2];
+
   WrenSplitLayout layout;
   // The first tab's share of the width, or of the height, between 0 and 1.
   double ratio;

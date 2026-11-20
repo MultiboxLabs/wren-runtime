@@ -66,9 +66,24 @@ Everything a tab strip shows comes from the tab and its state. Each piece has a 
 | --- | --- | --- |
 | Title and address | `tab.title`, `tab.url` | `.title`, `.url` |
 | Favicon | `tab.faviconPNG`, a PNG at 2x to draw at 16 points | `.favicon` |
-| Spinner, back and forward | `tab.state()`'s `loading`, `canGoBack` and `canGoForward` | `.loading`, `.history` |
+| Spinner and Stop button | `tab.state().showsLoading` | `.showsLoading` |
+| A progress bar | `tab.state().loadProgress`, a percent, 0 when the spinner isn't showing | `.loadProgress` |
+| Back and forward | `tab.state()`'s `canGoBack` and `canGoForward` | `.history` |
 | Pinned, grouped, discarded | `tab.state()`'s `pinned`, `group` and `discarded` | `.pinned`, `.group`, `.discarded` |
 | The link under the pointer | `tab.state().status`, `tab.statusText` | `.status` |
+
+Draw the spinner from `showsLoading`, not `loading`. `showsLoading` is Chrome's spinner: on while the page itself loads, from the navigation's start to its load event. `loading` stays on while any iframe loads, such as an ad's after the page has finished, and Chrome doesn't spin for that.
+
+### Duplicating and closing tabs
+
+`tab.duplicate()` is Chrome's Duplicate Tab. The copy goes right after the tab and becomes the active tab, with the tab's history, pinning and group, and loads its page again. `tab.duplicate(activate: false)` leaves it in the background, as a link opened in a new tab is. A popup's copy opens in a new popup Browser, which reaches `browserOpened`. The copy has none of your settings for the original, such as being left out of the session, so set them again if it needs them:
+
+```swift
+let copy = try tab.duplicate()
+try copy.setSessionExcluded(tab.state().sessionExcluded)
+```
+
+`tab.close()` is Chrome's Close Tab, so the page can ask in `beforeunload` whether to leave. When your app closes a tab on its own, such as one it no longer needs, call `tab.closeWithoutAsking()` instead. The page still runs its `pagehide` and `unload` handlers, and Reopen Closed Tab can bring the tab back, but the page can't keep it open. When the user closes a tab, call `close()`, so the page can ask.
 
 ### Moving and dragging tabs
 
@@ -273,7 +288,7 @@ macOS's Now Playing, the keyboard's media keys and the Picture in Picture window
 
 ### When a tab's page crashes
 
-When a page's process dies, the tab's view goes blank. Chrome shows its "Aw, Snap!" page there, but that page is part of Chrome's window, so in your app the view stays blank until you show something of your own over it. `tab.state().crash` says what happened: the page crashed, was killed, or ran out of memory. `.crashed` changes report it, and `tab.reload()` loads the page again.
+When a page's process dies, the tab's view goes blank. Chrome shows its "Aw, Snap!" page there, but that page is part of Chrome's window, so in your app the view stays blank until you show something of your own over it. `tab.state().crash` says what happened: the page crashed, was killed or never started, or ran out of memory. `.crashed` changes report it, and `tab.reload()` loads the page again.
 
 ### Which tab opened a tab
 
@@ -289,6 +304,47 @@ When a page's process dies, the tab's view goes blank. Chrome shows its "Aw, Sna
 Both are set by the time `changed` or `browserOpened` first reports the tab, and never change. A `noopener` link hides the opener from the page, but not from you. The record stays when the tab moves, when Chromium discards its page, and after the opener closes, when `openedBy` names a tab no call can find. Tabs you add, tabs extensions add and restored tabs have no opener, because the session doesn't keep it.
 
 Use it as Chrome does: show "Opened from" on a hover card, move focus back to the opener when a tab closes, or group a page with the tabs it opened.
+
+## The user agent pages see
+
+Some sites decide what to serve from the browser's user agent. Your app can choose the user agent its pages send, for the whole app, for a site, or for one tab. A `UserAgent` is the `User-Agent` header, `navigator.userAgent` and the client hints, which are the `Sec-CH-UA` headers and `navigator.userAgentData`.
+
+```swift
+let custom = UserAgent(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36 YourBrowser/1.0",
+    clientHints: .default)
+// Every page on example.com and its subdomains, in every Profile.
+try WrenApp.setUserAgentRules([UserAgentRule("example.com", custom)])
+// One tab, whatever its site, from its next load.
+try tab.setUserAgent(custom)
+try tab.reload()
+```
+
+Wren Runtime chooses at the start of each load of a page's top frame, from the first of these that applies:
+
+1. The tab's own setting, from `tab.setUserAgent`.
+2. The site rule whose domain matches the page's host most closely, from `WrenApp.setUserAgentRules`. A rule for `example.com` covers `www.example.com` too, as a cookie's domain does. Only http and https pages match.
+3. Your app's default, `Startup.userAgent`. Chromium's processes read it as they start, so it can't change while your app runs. See [Startup](startup.md#other-settings).
+4. Chromium's own.
+
+Web views follow the rules and the default.
+
+- **A change applies from the next load.** `tab.reload()` applies it to the page shown.
+- **A redirect keeps the choice made at the start of the load,** as in Chrome. A link through a short-link service to a site with a rule sends that site the user agent chosen for the short link's site. The next load chooses again.
+- **The page's frames and dedicated workers follow its choice.** Shared workers and service workers send your app's default whatever the page's choice, and so does `navigator` in a frame from another site that runs in a process of its own.
+- **Client hints.** `.none` sends no `Sec-CH-UA` headers and leaves `navigator.userAgentData.brands` empty, which is as close to Safari as Chromium gets. Safari has no `navigator.userAgentData` at all. `.custom` sends your own brands and fields. `.default` sends your app's default hints, or Chromium's.
+- **Nothing is saved.** The rules apply to every Profile until you set them again. A tab's setting lasts as long as the tab, through a discard, but a duplicate, a popup the tab opens and a restored tab start without it. Set both again each launch.
+
+DevTools' own user agent, in its Network conditions, comes before all of these.
+
+To start from the user agent your pages would send, read `WrenApp.defaultUserAgent()` once `ready` has run. It's your app's `Startup.userAgent` as you gave it, or without one, Chromium's, with `.custom` hints and Chromium's brands and fields. The rules and the tabs' settings never change it, so a rule can take Chromium's string and change part of it.
+
+```swift
+if var agent = WrenApp.defaultUserAgent() {
+    agent.brands.removeAll { $0.brand == "Chromium" }
+    try WrenApp.setUserAgentRules([UserAgentRule("example.com", agent)])
+}
+```
 
 ## Windows Chromium opens
 
@@ -381,7 +437,7 @@ let state = try split.state()                   // first, second, layout, ratio
 try split.setRatio(0.4, dragging: true)         // while your divider is dragged
 ```
 
-While either side is the active tab, show both views, divided by `state.ratio`, with a divider of your own between them. `.split` changes report changes to the split. Chromium keeps the two tabs together, and closing one side ends the split, as does pinning or moving one side on its own.
+While either side is the active tab, show both views, divided by `state.ratio`, with a divider of your own between them. `.split` changes report changes to the split. Chromium keeps the two tabs together, and closing one side ends the split, as does pinning or moving one side on its own. Duplicating the first side puts the copy between the two, which ends the split too, as Chrome's Duplicate Tab does. A copy of the second side goes after the split.
 
 To close a split as one, close both tabs together. Each page may ask in `beforeunload`, and if one keeps its tab, both stay open and the split with them:
 
@@ -451,6 +507,16 @@ Each restored window arrives in `browserOpened` with its tabs, their order and t
 
 Each launch restores a Profile's last session once, as Chrome does. A second `restoreLastSession` fails with `.notAllowed`, so no two windows end up with the same tabs.
 
+### Session cookies and sessionStorage
+
+A restored tab keeps its session cookies, the ones with no expiry, and its page's sessionStorage only if the Profile keeps its session data, as Chrome does when it continues where it left off. Otherwise Chromium deletes them as the Profile loads, so a site that keeps its sign-in in a session cookie is signed out. Turn the setting on for each Profile you restore:
+
+```swift
+try profile.setKeepsSessionData(true)   // from the Profile's next load
+```
+
+A Profile reads the setting as it loads, so it applies from the next launch, and it restores nothing by itself. The user can change it in chrome://settings/onStartup too, and `.profiles` changes report it. After Chromium's relaunch, every Profile keeps its session data, as in Chrome.
+
 `browser.reopenClosedTab()` is Chrome's Reopen Closed Tab, for a tab or a whole window. Turn its menu item on and off by `browser.canReopenClosedTab`.
 
 ### Tabs your app makes itself
@@ -496,6 +562,8 @@ The address field and its suggestions, the site icon, extensions' buttons and Ch
 | `browser.activeTab` | `Browser::active_tab` | `Wren_GetActiveTab` |
 | `tab.view` | `BrowserTab::view` | `Wren_GetTabView` |
 | `tab.activate()` | `BrowserTab::activate` | `Wren_ActivateTab` |
+| `tab.duplicate()` | `BrowserTab::duplicate` | `Wren_DuplicateTab` |
+| `tab.closeWithoutAsking()` | `BrowserTab::close_without_asking` | `Wren_CloseTabWithoutAsking` |
 | `tab.focus()` | `BrowserTab::focus` | `Wren_FocusTab` |
 | `BrowserTab.close(_:completion:)` | `BrowserTab::close_all` | `Wren_CloseTabs` |
 | `browser.locationFocus` | `Browser::location_focus` | `Wren_GetLocationFocus` |
@@ -521,6 +589,11 @@ The address field and its suggestions, the site icon, extensions' buttons and Ch
 | `tab.controlMedia` | `BrowserTab::control_media` | `Wren_ControlTabMedia` |
 | `tab.seekMedia(to:)` | `BrowserTab::seek_media` | `Wren_SeekTabMedia` |
 | `tab.reload()` | `BrowserTab::reload` | `Wren_Reload` |
+| `UserAgent`, `UserAgentBrand` | `UserAgent`, `UserAgentBrand` | `WrenUserAgent`, `WrenUserAgentBrand` |
+| `.default`, `.none`, `.custom` | `ClientHints::Default`, `ClientHints::None`, `ClientHints::Custom` | `WREN_CLIENT_HINTS_DEFAULT`, `WREN_CLIENT_HINTS_NONE`, `WREN_CLIENT_HINTS_CUSTOM` |
+| `WrenApp.setUserAgentRules`, `UserAgentRule` | `MainThread::set_user_agent_rules`, `UserAgentRule` | `Wren_SetUserAgentRules`, `WrenUserAgentRule` |
+| `tab.setUserAgent` | `BrowserTab::set_user_agent` | `Wren_SetTabUserAgent` |
+| `WrenApp.defaultUserAgent()` | `MainThread::default_user_agent` | `Wren_GetDefaultUserAgent` |
 | `browser.windowFeatures` | `Browser::window_features` | `Wren_GetWindowFeatures` |
 | `browser.requestedBounds` | `Browser::requested_bounds` | `Wren_GetRequestedBounds` |
 | `browser.requestedWindowState` | `Browser::requested_window_state` | `Wren_GetRequestedWindowState` |
@@ -540,6 +613,8 @@ The address field and its suggestions, the site icon, extensions' buttons and Ch
 | `browser.hasModalDialog` | `Browser::has_modal_dialog` | `Wren_HasModalDialog` |
 | `profile.restoreLastSession` | `Profile::restore_last_session` | `Wren_RestoreLastSession` |
 | `profile.lastSession` | `Profile::last_session` | `Wren_GetLastSession` |
+| `profile.setKeepsSessionData` | `Profile::set_keeps_session_data` | `Wren_SetProfileKeepsSessionData` |
+| `profile.keepsSessionData` | `Profile::keeps_session_data` | `Wren_GetProfileKeepsSessionData` |
 | `browser.reopenClosedTab()` | `Browser::reopen_closed_tab` | `Wren_ReopenClosedTab` |
 | `browser.canReopenClosedTab` | `Browser::can_reopen_closed_tab` | `Wren_CanReopenClosedTab` |
 | `tab.setSessionExcluded` | `BrowserTab::set_session_excluded` | `Wren_SetTabSessionExcluded` |

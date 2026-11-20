@@ -117,7 +117,8 @@ wren bundle --executable MyBrowser \
 | Header | What's in it |
 | --- | --- |
 | `Wren.h` | Shared types and results, startup, changes, your app's callbacks, `Wren_Main`, the versions, and work from other threads |
-| `WrenBrowser.h` | Profiles and their password manager, importing history and cookies, Browsers, several Browsers in one window, full screen and side panels |
+| `WrenBrowser.h` | Profiles, their password manager and autofill, importing history, Browsers, several Browsers in one window, full screen and side panels |
+| `WrenCookies.h` | A Profile's cookies, reading, setting, deleting and watching them, and its cookie settings |
 | `WrenTabs.h` | Tabs and navigation, tab groups, a tab's view, splits, DevTools, and what a tab is doing |
 | `WrenExtensions.h` | Extensions' buttons, a Profile's installed extensions, installing from the Chrome Web Store, and your app's own |
 | `WrenToolbar.h` | Where bubbles open from, page actions and site setting icons |
@@ -126,8 +127,9 @@ wren bundle --executable MyBrowser \
 | `WrenPrompts.h` | Chromium's prompts and toasts as data, and your app's own toasts |
 | `WrenOmnibox.h` | What the address field shows, and Chromium's suggestions |
 | `WrenBookmarks.h` | A Profile's bookmarks |
-| `WrenSession.h` | The last session, restoring it, and reopening closed tabs |
+| `WrenSession.h` | The last session, restoring it, its session data, and reopening closed tabs |
 | `WrenSchemes.h` | Your own URL schemes |
+| `WrenUserAgent.h` | The user agent pages see, by site and by tab |
 | `WrenWebView.h` | Web views, and messages with their pages |
 | `WrenMenus.h` | The main menu and context menus |
 | `WrenClipboard.h` | Text and URLs on the system clipboard |
@@ -143,7 +145,7 @@ wren bundle --executable MyBrowser \
 - **Completion callbacks run later,** from the event loop, never inside the call that started them. That goes for `Wren_OpenProfile`, `Wren_CreateBrowser` and the rest.
 - **Most delegate callbacks run from the event loop,** including `on_changed`, `on_reopen` and `on_open_urls`, so they can call any function.
 - **Some run inside Chromium's call.** `on_popover`, `on_fullscreen`, `on_downloads_prompt`, `on_quit_prompt`, `on_quit_committed` and `on_navigation` run while Chromium waits. Until they return, calls that change Browsers, tabs, navigation or popovers return `WREN_ERROR_NOT_ALLOWED`. `on_profile_extensions` also runs inside Chromium's call, and can make no Wren Runtime calls at all.
-- **Closing is a request.** `Wren_CloseTab`, `Wren_CloseTabs`, `Wren_CloseBrowsers` and `Wren_Quit` take effect after you return, and a page can cancel them. Every other call takes effect before it returns, and its `on_changed` record follows later.
+- **Closing is a request.** `Wren_CloseTab`, `Wren_CloseTabs`, `Wren_CloseBrowsers` and `Wren_Quit` take effect after you return, and a page can cancel them. `Wren_CloseTabWithoutAsking` takes effect after you return too, and no page can cancel it. Every other call takes effect before it returns, and its `on_changed` record follows later.
 
 ### Handles
 

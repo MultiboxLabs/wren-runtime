@@ -302,91 +302,14 @@ WREN_API void Wren_AddHistory(WrenProfile* profile,
                               WrenAddHistoryCallback callback,
                               void* context);
 
-// --- Importing cookies ------------------------------------------------------
-
-typedef enum WrenCookieSameSite {
-  WREN_COOKIE_SAME_SITE_UNSPECIFIED = 0,
-  WREN_COOKIE_SAME_SITE_NONE = 1,
-  WREN_COOKIE_SAME_SITE_LAX = 2,
-  WREN_COOKIE_SAME_SITE_STRICT = 3,
-} WrenCookieSameSite;
-
-// A cookie of the user's in another browser.
-typedef struct WrenCookie {
-  const char* name;
-  const char* value;
-  // ".example.com" for the domain and its subdomains, "example.com" for the
-  // host only.
-  const char* domain;
-  const char* path;
-  // Milliseconds since 1970, UTC. 0 for `expires_ms` is a session cookie, and
-  // 0 for the others is now. Chromium keeps a cookie at most 400 days past its
-  // creation date, and Chrome's own cookies can be older. So Wren_AddCookies
-  // keeps `expires_ms` up to 400 days from now. It moves a creation date more
-  // than 400 days before that expiry to 400 days before it, and a last access
-  // earlier than that creation date to it.
-  int64_t created_ms;
-  int64_t expires_ms;
-  int64_t last_access_ms;
-  bool secure;
-  bool http_only;
-  WrenCookieSameSite same_site;
-  // The top-level site of a partitioned (CHIPS) cookie, such as
-  // "https://example.com", or NULL.
-  const char* partition_site;
-  // True if the partitioned cookie was set in a frame with a cross-site
-  // ancestor.
-  bool partition_cross_site_ancestor;
-} WrenCookie;
-
-typedef enum WrenCookieResult {
-  WREN_COOKIE_WRITTEN = 0,
-  // Not a cookie Chromium keeps: its name, value, domain, path, prefix or
-  // partition is invalid, or it is SameSite=None or partitioned without
-  // Secure.
-  WREN_COOKIE_INVALID = 1,
-  // It had already expired.
-  WREN_COOKIE_EXPIRED = 2,
-  // A Secure cookie of the same name is there, which a cookie that is not
-  // Secure may not replace.
-  WREN_COOKIE_CONFLICT = 3,
-  // Chromium could not store it.
-  WREN_COOKIE_FAILED = 4,
-} WrenCookieResult;
-
-// Receives the result of Wren_AddCookies. With WREN_OK, `results` has one
-// result for each cookie, in order, valid during the call.
-typedef void (*WrenAddCookiesCallback)(void* context,
-                                       WrenResult result,
-                                       const WrenCookieResult* results,
-                                       size_t count);
-
-// Writes `cookies` into the Profile's cookie store, as a site setting them
-// would, HttpOnly and SameSite included, and writes the store to disk before
-// it answers. An off-the-record Profile's cookies are its own, and go when it
-// closes. `callback` gets the results from the event loop. It is not called if
-// the app quits first.
-//
-// `callback` gets one of these errors without anything being written:
-//
-// - WREN_ERROR_INVALID_ARGUMENT for no Profile, NULL `cookies` with a count,
-//   a cookie with a NULL name, value, domain or path, or an unknown
-//   `same_site`.
-// - WREN_ERROR_CLOSED once the Profile has closed. If it closes before the
-//   cookies are written, `callback` gets it too.
-// - WREN_ERROR_NOT_ALLOWED inside on_popover.
-WREN_API void Wren_AddCookies(WrenProfile* profile,
-                              const WrenCookie* cookies,
-                              size_t count,
-                              WrenAddCookiesCallback callback,
-                              void* context);
-
 // --- The password manager ---------------------------------------------------
 
 // Chromium's password manager in a Profile: saving and filling passwords, its
 // key in the address bar (WREN_PAGE_ACTION_PASSWORDS) and its prompts
 // (WREN_POPOVER_PASSWORDS). It is on unless the app turns it off. An app with
-// a password manager of its own, or an extension's, turns it off.
+// a password manager of its own, or an extension's, turns it off. Addresses,
+// payment methods and the values typed before in a field are autofill's
+// (Wren_SetAutofill).
 typedef struct WrenPasswordManagerState {
   // On, as in Chrome. Off, Chromium offers to save no password, fills none,
   // suggests none, signs in to no site, and shows no key or prompt. What is
@@ -414,6 +337,45 @@ Wren_GetPasswordManagerState(WrenProfile* profile,
 // that runs inside Chromium's call, and WREN_ERROR_CLOSED once the Profile
 // has closed.
 WREN_API WrenResult Wren_SetPasswordManager(WrenProfile* profile, bool on);
+
+// --- Autofill ---------------------------------------------------------------
+
+// Chromium's autofill in a Profile: saving and filling addresses and payment
+// methods, offering again the values typed before in a field of the same name
+// (autocomplete), and its prompts to save an address or a card
+// (WREN_POPOVER_SAVE_ADDRESS and WREN_POPOVER_SAVE_CARD). It is on unless the
+// app or the user turns it off. Passwords are the password manager's: an app
+// that wants Chromium to fill nothing turns both off.
+typedef struct WrenAutofillState {
+  // On, as in Chrome, while either of Chrome's switches in Settings is on:
+  // "Save and fill addresses" (chrome://settings/addresses) and "Save and
+  // fill payment methods" (chrome://settings/payments). Off, Chromium saves,
+  // fills and suggests no address, no typed value, no card and no IBAN, and
+  // asks to save none. What is saved stays saved, and Settings still lists
+  // it. A page's own <datalist> suggestions still show.
+  bool on;
+  // Policy sets either switch (AutofillAddressEnabled or
+  // AutofillCreditCardEnabled), and Wren_SetAutofill refuses to change it.
+  bool managed;
+} WrenAutofillState;
+
+// Fills `state`. An off-the-record Profile has its original's. From the
+// first call for `profile`, the app hears WREN_CHANGE_AUTOFILL for it.
+// Returns WREN_ERROR_CLOSED once the Profile has closed.
+WREN_API WrenResult Wren_GetAutofillState(WrenProfile* profile,
+                                          WrenAutofillState* state);
+
+// Turns autofill on or off for `profile` and its off-the-record Profile, and
+// for later launches, by turning both of Settings' switches on or off. The
+// user may turn either back on in Settings, and the app hears it as
+// WREN_CHANGE_AUTOFILL. A page follows it from the next time a field asks
+// for suggestions; a page already filled keeps its values. On an
+// off-the-record Profile, it sets its original's. It may be called inside
+// on_popover.
+//
+// Returns WREN_ERROR_NOT_ALLOWED where policy sets either switch, and then
+// changes neither. Returns WREN_ERROR_CLOSED once the Profile has closed.
+WREN_API WrenResult Wren_SetAutofill(WrenProfile* profile, bool on);
 
 // --- Browsers ---------------------------------------------------------------
 

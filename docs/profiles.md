@@ -30,6 +30,7 @@ You can change a persistent Profile the same ways Chrome's settings page can.
 - **Its name.** `profile.rename(_:)` renames it, without spaces at either end.
 - **Its avatar.** `WrenApp.avatars` lists the avatars Chrome offers, and `profile.setAvatar(_:)` sets one. `WrenApp.avatarPNG` draws any of them, and `WrenApp.profileAvatarPNG(id:)` draws a listed Profile's avatar, even one that isn't loaded. The first avatar is a silhouette in the Profile's colours. Chromium downloads each avatar's large image from `www.gstatic.com` once, and draws a small built-in one until then. Chromium can't use an image of your own as an avatar, so keep any icons of your own by Profile ID.
 - **Its colour.** `profile.setColor(_:)` sets the theme's colour, an opaque `0xFFRRGGBB`, and `profile.resetColor()` goes back to Chromium's default. `profile.color` reads it.
+- **Whether it keeps its session data.** `profile.setKeepsSessionData(_:)` keeps the last session's session cookies and sessionStorage for your restore, from the Profile's next load, as Chrome's Continue where you left off does. [Windows and tabs](windows-and-tabs.md#session-cookies-and-sessionstorage) has the details.
 
 ## Deleting a Profile
 
@@ -66,6 +67,36 @@ While it's off, Chromium saves, fills and suggests nothing, and shows no prompts
 
 Where policy decides which sites the password manager is off for, `passwordManagerState().managed` is true, and `setPasswordManager` fails with `.notAllowed`.
 
+## Turning off Chromium's autofill
+
+Chromium's autofill is on in every Profile, as in Chrome. It saves addresses and payment cards and fills them in, offers again what someone typed before in a field with the same name, and asks to save an address or a card after a form is sent. If your app fills forms its own way, `profile.setAutofill(false)` turns Chromium's off. Passwords are the password manager's, so to have Chromium fill nothing at all, turn both off.
+
+Off is the same as turning off Save and fill addresses and Save and fill payment methods in Chrome's settings, which is what the call does. While both are off, Chromium saves, fills and suggests no address, typed value or card, and asks to save none. A page's own `<datalist>` suggestions still show. The Profile remembers the choice at later launches, and its incognito side follows it. What was saved stays, and Settings still lists it.
+
+Someone can still turn either switch back on in chrome://settings. `autofillState().on` is true while either is on, and your app hears `.autofill` for the Profile whenever either changes, once it has read the state. If your app's own switch must hold, keep people out of those Settings pages.
+
+Where policy sets either switch, `autofillState().managed` is true, and `setAutofill` fails with `.notAllowed`.
+
+## Cookies
+
+Your app can read, set, delete and watch a Profile's cookies, in the same store its pages use. That's what a cookie manager, a sign-in flow that hands a session to the browser, or another engine that must send the same cookies needs.
+
+- **Reading.** `profile.cookies(matching:)` gives every cookie, or those a `CookieFilter` matches: the ones a request to a URL would send, or those of one domain, name, path or partition. Each `Cookie` has its value, expiry, flags, priority and partition. Reading doesn't count as a site using the cookie.
+- **Setting.** `profile.setCookies` sets cookies as a site setting them would, including HttpOnly and SameSite. A cookie replaces the one with the same name, domain, path and partition. The completion gets a result for each cookie, such as written, invalid, or expired.
+- **Deleting.** `profile.deleteCookies(matching:)` deletes the cookies a filter matches, and with `nil` it deletes every cookie in the Profile. The completion gets how many went. `clearBrowsingData` deletes cookies with the rest of each site's data, over a period.
+- **Watching.** `profile.watchCookies` calls your closure with each batch of changes, each with the cookie and why it changed: set, deleted, replaced by a newer one, expired, evicted, or set already expired. The watch lasts until you stop it or let it go, or until the Profile closes.
+
+Setting and deleting save the store to disk before the completion runs, so a crash right after loses nothing. An incognito Profile's cookies are its own, and go when it closes. Your app's own changes ignore a site's cookie settings, as an extension's do in Chrome.
+
+### Cookie settings
+
+Chrome's Settings has two choices about cookies for a whole Profile, and your app can read and change both, for a privacy menu of its own:
+
+- **Third-party cookies.** `profile.setThirdPartyCookiesBlocked(true)` blocks them on every site, and `false` blocks them only in incognito, which is Chromium's default. Pages follow from their next load.
+- **What sites may save.** `profile.setSiteDataDefault` allows sites to save data, which is the default, deletes what they saved when the Profile's last window closes, or blocks them from saving anything. Blocking breaks many sites, as Chrome warns.
+
+`profile.cookieSettings()` reads both, and whether policy sets either, in which case the setter fails with `.notAllowed`. Your app hears `.cookieSettings` for the Profile whenever either changes, from your app or from Settings, once it has read them. An incognito Profile has its normal Profile's settings, and Chromium blocks third-party cookies in incognito whatever they are. Exceptions for single sites are still Chromium's own, in Settings.
+
 ## Bringing data over from another browser
 
 When someone switches to your browser from Chrome, Arc or Safari, you can bring their history, cookies, extensions and bookmarks with them. Your app reads the other browser's files, and Wren Runtime writes the data into a Profile the way Chrome's own importer does. Chromium shows no UI for this, so ask first, and say what you'll bring.
@@ -82,11 +113,11 @@ profile.addHistory(entries) { result in
 ```
 
 - **History.** `profile.addHistory` adds pages with their titles, last visits, and how often each was visited and typed. Give the counts, because the address field suggests a page typed once, visited 4 times, or visited in the past 3 days. A page already in history gains a visit and keeps its counts. Pages history doesn't keep, such as `chrome://` pages, and visits older than 90 days are left out. The completion gets how many pages were added.
-- **Cookies.** `profile.addCookies` writes cookies as a site setting them would, including HttpOnly and SameSite, and saves them to disk before the completion runs. The completion gets a result for each cookie, such as written, invalid, or expired. An incognito Profile's cookies are its own.
+- **Cookies.** `profile.setCookies` writes the other browser's cookies, as [Cookies](#cookies) says. Give each its creation date and priority, which Chromium uses to choose what to remove when a site has too many.
 - **Extensions.** `profile.installFromWebStore` installs Chrome Web Store extensions by ID, as Chrome installs someone's synced extensions on a new Mac. Each one comes in turned on, with the permissions it asks for. See [Extensions your app ships](extensions.md#installing-someones-extensions-from-the-chrome-web-store).
 - **Bookmarks.** `profile.addBookmark` adds each bookmark and folder. [`WrenBookmarks.h`](../include/WrenBookmarks.h) has the details.
 
-Wren Runtime refuses the calls for history, cookies and extensions with `.notAllowed` inside `popover` and the other callbacks that run inside Chromium's call.
+Wren Runtime refuses the calls for history, cookies and extensions with `.notAllowed` inside `popover` and the other callbacks that run inside Chromium's call, and makes no cookie watch there.
 
 ### Where Chromium browsers keep the data
 
@@ -111,11 +142,19 @@ Browsers built on Chromium, such as Chrome and Arc, keep each Profile's data in 
 | `WrenApp.avatars` | `MainThread::avatars` | `Wren_GetAvatarCount` |
 | `profile.setAvatar` | `Profile::set_avatar` | `Wren_SetProfileAvatar` |
 | `profile.setColor` | `Profile::set_color` | `Wren_SetProfileColor` |
+| `profile.setKeepsSessionData` | `Profile::set_keeps_session_data` | `Wren_SetProfileKeepsSessionData` |
 | `profile.delete` | `Profile::delete` | `Wren_DeleteProfile` |
 | `profile.clearBrowsingData` | `Profile::clear_browsing_data` | `Wren_ClearBrowsingData` |
 | `profile.clearDownloadHistory()` | `Profile::clear_download_history` | `Wren_ClearDownloadHistory` |
 | `profile.setPasswordManager` | `Profile::set_password_manager` | `Wren_SetPasswordManager` |
+| `profile.setAutofill`, `.autofill` | `Profile::set_autofill`, `ChangeKind::Autofill` | `Wren_SetAutofill`, `WREN_CHANGE_AUTOFILL` |
 | `profile.addHistory`, `HistoryEntry` | `Profile::add_history`, `HistoryEntry` | `Wren_AddHistory`, `WrenHistoryEntry` |
-| `profile.addCookies`, `Cookie`, `CookieResult` | `Profile::add_cookies`, `Cookie`, `CookieResult` | `Wren_AddCookies`, `WrenCookie`, `WrenCookieResult` |
+| `profile.setCookies`, `Cookie`, `CookieResult` | `Profile::set_cookies`, `Cookie`, `CookieResult` | `Wren_SetCookies`, `WrenCookie`, `WrenCookieResult` |
+| `profile.cookies(matching:)`, `CookieFilter` | `Profile::cookies`, `CookieFilter` | `Wren_GetCookies`, `WrenCookieFilter` |
+| `profile.deleteCookies(matching:)` | `Profile::delete_cookies` | `Wren_DeleteCookies` |
+| `profile.cookieSettings()`, `.cookieSettings` | `Profile::cookie_settings`, `ChangeKind::CookieSettings` | `Wren_GetCookieSettings`, `WREN_CHANGE_COOKIE_SETTINGS` |
+| `profile.setThirdPartyCookiesBlocked` | `Profile::set_third_party_cookies_blocked` | `Wren_SetThirdPartyCookiesBlocked` |
+| `profile.setSiteDataDefault`, `SiteDataDefault` | `Profile::set_site_data_default`, `SiteDataDefault` | `Wren_SetSiteDataDefault`, `WrenSiteDataDefault` |
+| `profile.watchCookies`, `CookieWatch`, `CookieChange` | `Profile::watch_cookies`, `CookieWatch`, `CookieChange` | `Wren_WatchCookies`, `Wren_StopWatchingCookies`, `WrenCookieChange` |
 | `profile.installFromWebStore` | `Profile::install_from_web_store` | `Wren_InstallFromWebStore` |
 | `profile.addBookmark` | `Profile::add_bookmark` | `Wren_AddBookmarkItem` |

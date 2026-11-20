@@ -60,9 +60,10 @@ In Rust, `web_view.set_changed` takes the same kind of closure, and `web_view.st
 
 | `state` | What it says |
 | --- | --- |
-| `loading` | The page is loading. |
+| `loading` | The page or any of its iframes is loading. |
+| `showsLoading`, `loadProgress` | As a tab's, Chrome's spinner and the load's progress as a percent: on while the page itself loads, and 0 when it isn't. |
 | `loadError` | Chromium's network error for the last load, a negative number, or 0 once the next load starts. |
-| `crash` | Why the page is gone, if it is: its process crashed, was killed, or ran out of memory. The view then shows nothing. |
+| `crash` | Why the page is gone, if it is: its process crashed, was killed or never started, or ran out of memory. The view then shows nothing. |
 | `drawn` | The page has drawn its first frame with something in it, like Electron's `ready-to-show`. It's false again once another page starts, and while the page is crashed. |
 | `devtools` | DevTools is open for the page. |
 | `isLoaded` | Not loading, with no load error and no crash. |

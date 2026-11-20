@@ -81,7 +81,7 @@ Your app's own name, Dock icon and bundle ID aren't set here. They come from [`w
 Chromium started as Chrome does a few things a browser built on it usually wouldn't want. Wren Runtime turns them off, and you can do each one yourself when you want it.
 
 - **No window opens by itself.** Not at launch, not when someone clicks the Dock icon, and not when macOS asks your app to open a link. You get `ready`, `reopen` and `openURLs`, and open what suits your app.
-- **The last session isn't restored by itself,** after a quit or after a crash. Chromium still records it, and `profile.restoreLastSession` brings it back. See [Windows and tabs](windows-and-tabs.md#restoring-the-last-session).
+- **The last session isn't restored by itself,** after a quit or after a crash. Chromium still records it, and `profile.restoreLastSession` brings it back. A Profile keeps the session's session cookies and sessionStorage for it only once you turn that on. See [Windows and tabs](windows-and-tabs.md#restoring-the-last-session).
 - **Chrome's field trials don't apply.** Your app runs on Chromium's built-in defaults, plus a fixed list of features that Chrome turns on.
 
 Chromium's sandboxes and site isolation work exactly as they do in Chrome.
@@ -98,7 +98,8 @@ Chrome turns on some security features because it's Google's build, and a build 
 
 - **`schemes`** lists URL schemes your app serves itself, such as `app://`. They go here because Chromium fixes its list of schemes as it starts. See [Your own URL schemes](schemes.md).
 - **`extensions`** lists extensions your app ships, as `.crx` files. If Wren Runtime can't read one, the app doesn't start. The settings for Manifest V2 extensions and native messaging hosts are here too. See [Extensions your app ships](extensions.md).
-- **`developmentSwitches`** passes extra Chromium command-line switches while you develop, such as `--remote-debugging-pipe`. Wren Runtime refuses a switch that would override something `Startup` decides, such as the data folder.
+- **`userAgent`** is the user agent every page, worker and request sends unless a site rule or a tab's setting chooses another. It goes here because Chromium's processes read it as they start. See [The user agent pages see](windows-and-tabs.md#the-user-agent-pages-see).
+- **`developmentSwitches`** passes extra Chromium command-line switches while you develop, such as `--remote-debugging-pipe`. Wren Runtime refuses a switch that would override something `Startup` decides, such as the data folder or `--user-agent`.
 
 ## An app without a Dock icon
 
@@ -116,6 +117,16 @@ delegate.ready = {
 `WrenApp.defaultBrowserState` asks macOS whether your app is the default browser. `WrenApp.setAsDefaultBrowser` asks macOS to make it so, which shows macOS's own prompt, as Chrome's Settings do. Both answer in a completion.
 
 macOS offers your app as a browser only if its `Info.plist` claims `http`, `https` and `public.html`. List them in the manifest's `urlSchemes` and `documentTypes`, and `wren bundle` adds them. See [The `wren` command](wren-cli.md#the-manifest). The links macOS then sends your app arrive in `openURLs`.
+
+Each request to open URLs says where it came from, so your app can tell a link clicked in Mail from a file opened in Finder or a page handed off from an iPhone. `source` is `.app` with the sending app's `appID`, `appName` and `appPath`, `.handoff`, or `.unknown`. A helper inside an app reports the app around it. A command such as `open` in Terminal has quit by the time your app asks, so its requests are `.unknown`, as are calls your app makes itself. Only macOS says where a request came from, so on other platforms every request will be `.unknown`.
+
+```swift
+appDelegate.openURLs = { request in
+    if case .app = request.source, let name = request.appName {
+        print("Opening \(request.urls.count) URLs from \(name)")
+    }
+}
+```
 
 After your first ask, Wren Runtime checks again each time your app becomes active, and reports a different answer as a `.defaultBrowser` change. So you hear about it when someone picks another browser in System Settings. `canSet` is false where policy turns the setting off.
 
@@ -136,6 +147,7 @@ Rust's `Startup` has the same fields in snake case, such as `user_data_directory
 | `AppExtension` | `AppExtension` | `WrenAppExtension` |
 | `.unknown`, `.stable`, `.beta`, `.dev`, `.canary` | `Channel::Unknown`, `Channel::Stable` and the others | `WREN_CHANNEL_UNKNOWN`, `WREN_CHANNEL_STABLE` and the others |
 | `googleAPIKey` | `google_api_key` | `google_api_key` |
+| `userAgent` | `user_agent` | `user_agent` |
 | `WrenApp.run` | `wren::run` | `Wren_Main` |
 | `.invalidStartup`, `.alreadyRunning`, `.apiMismatch` | `ExitStatus::InvalidStartup`, `ExitStatus::AlreadyRunning`, `ExitStatus::ApiMismatch` | `WREN_EXIT_INVALID_STARTUP`, `WREN_EXIT_ALREADY_RUNNING`, `WREN_EXIT_API_MISMATCH` |
 | `WrenApp.setMainMenu` | `MainThread::set_main_menu` | `Wren_SetMainMenu` |

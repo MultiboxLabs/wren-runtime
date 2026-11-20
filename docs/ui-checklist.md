@@ -58,7 +58,7 @@ When a window's UI is one [web view](web-views.md)'s page, the page draws the pi
 | [Workspaces](workspaces.md), several Browsers shown in turn | Keep all but one in the background, and decide what to do when Chromium wants another in front | `Wren_SetBrowserBackgrounded`, `WREN_CHANGE_FOREGROUND_REQUEST` |
 | The page failing or crashing | Reload it, or show something of your own | `Wren_GetWebViewState`, `Wren_ReloadWebView`, `WREN_CHANGE_WEB_VIEW` |
 | A development server | Trust its origin, in development builds only | `WrenWebViewOptions.trusted_origins` |
-| Context menus | Show the items the page sends for its right clicks. Text fields get Wren Runtime's editing menu. | `Wren_ShowContextMenu`, and [Menus](menus.md) |
+| Context menus | Show the items the page sends for its right clicks. Text fields get Wren Runtime's editing menu, and a tab's page Chromium's, which you can edit, replace or draw yourself. | `Wren_CreateContextMenu`, `Wren_ShowContextMenu`, `on_context_menu`, and [Menus](menus.md#context-menus) |
 
 ## The address field
 

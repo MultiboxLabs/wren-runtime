@@ -25,7 +25,7 @@ The script installs the newest release's `wren` into `~/.local/bin`, after check
 
 | Variable | What it changes |
 | --- | --- |
-| `WREN_VERSION` | Installs that release's `wren`, such as `0.5.0`, instead of the newest |
+| `WREN_VERSION` | Installs that release's `wren`, such as `0.6.0`, instead of the newest |
 | `WREN_INSTALL_DIR` | Installs into that folder instead of `~/.local/bin` |
 | `WREN_RELEASES_URL` | Downloads from a mirror of the releases page instead of GitHub |
 
@@ -51,7 +51,7 @@ The script installs the newest release's `wren` into `~/.local/bin`, after check
 
 Run it in your project's folder, beside its `wren-app.json`:
 
-1. It reads the release the manifest names, such as `"wren": "0.5.0"`.
+1. It reads the release the manifest names, such as `"wren": "0.6.0"`.
 2. If that release isn't on this Mac yet, it downloads its zip and `SHA256SUMS` from `MultiboxLabs/wren-runtime`, and refuses a zip that doesn't match.
 3. It unpacks the release into `~/.wren/runtimes/<version>`, or `$WREN_RUNTIMES/<version>` when that's set, such as for a CI cache.
 4. It links `.wren/runtime` in your project to that release, and keeps `.wren` out of git.
@@ -145,7 +145,7 @@ An incremental bundle also starts faster. macOS scans a bundle it hasn't seen be
   "infoPlist": {
     "SUFeedURL": "https://example.com/appcast.xml"
   },
-  "wren": "0.5.0"
+  "wren": "0.6.0"
 }
 ```
 
@@ -286,9 +286,23 @@ wren pack-extension Blocker --key ~/keys/blocker.pem --new-key --output Blocker.
 wren pack-extension Blocker --key ~/keys/blocker.pem --output Blocker.crx
 ```
 
-It prints the extension's ID and version. The key is an RSA private key in a PEM file, and it decides the extension's ID. So `wren` makes a key only with `--new-key`, never replaces an existing file, and refuses a key inside the extension's folder, which would be packed with it. The key it makes is readable only by you. A key from Chrome's Pack Extension works too.
+It prints the extension's ID and version. The key is an RSA private key in a PEM file, and it decides the extension's ID. So `wren` makes a key only with `--new-key`, and never replaces an existing file. The key it makes is readable only by you. A key from Chrome's Pack Extension works too.
 
-Hidden files, such as `.DS_Store`, are left out, as Chrome leaves them out. `wren` checks only that `manifest.json` has a `version`, and Chromium checks the rest when it installs the extension.
+The package holds the files Chrome's Pack Extension would pack, compressed the same way. A link is packed as the file or folder it leads to. These are left out:
+
+- hidden files and folders, such as `.DS_Store` and `.git`
+- `__MACOSX`, `desktop.ini` and `Thumbs.db`
+- Emacs backups and auto-saves, such as `notes.txt~` and `#notes.txt#`
+- the folder's own `_metadata`, which Chromium keeps for what it writes when it installs the extension
+
+`wren` exits 1 without packing, and says why, if:
+
+- the key or the output is inside the extension's folder, where the next pack would hold it
+- the folder has another key in it, which is any `.pem` file Chromium can read as a key
+- the key isn't RSA, which is the only kind `wren` signs a package with
+- a link leads to nothing, or to a folder that holds it
+
+Beyond that, `wren` checks only that `manifest.json` has a `version`, and Chromium checks the rest when it installs the extension.
 
 ## `wren extension-id`
 
@@ -312,7 +326,7 @@ For a folder, the ID comes from the `key` in its `manifest.json`, as for an [int
 
 ## Things to know
 
-- **Each app carries its own framework,** about 350 MB in release 0.5.0, as Electron apps do. It runs only with the release your app was built against, because the framework accepts only its own API version.
+- **Each app carries its own framework,** about 350 MB in release 0.6.0, as Electron apps do. It runs only with the release your app was built against, because the framework accepts only its own API version.
 - **Started from a terminal, prompts name the terminal.** macOS names the app responsible for a process in permission prompts and notifications. Run the executable from a shell, and they name your terminal. Start the app with `open` or from Finder, and they name your app.
 - **An empty folder appears in Application Support.** A bundled app creates `~/Library/Application Support/<name>`, Chromium's default data folder, even when its data is elsewhere.
 - **Ship Chromium's notices with your app.** Chromium's licence and its third-party licences ask that their notices go with every copy. A release has them in `LICENSES`: `Chromium.txt`, `third-party.txt`, and `credits.html`, which your app's `chrome://credits` shows. `Source.txt` says where to get the source of the LGPL and MPL files Wren Runtime changes, which people who get your app may ask for. Ship all four with your app, such as in its Resources folder, linked from its About window.

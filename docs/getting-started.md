@@ -24,7 +24,7 @@ Make a folder for the project, and put a `wren-app.json` in it. It gives your ap
   "name": "MyBrowser",
   "displayName": "My Browser",
   "bundleId": "com.example.mybrowser",
-  "wren": "0.5.0"
+  "wren": "0.6.0"
 }
 ```
 
@@ -368,12 +368,12 @@ This app is built with Wren Runtime, linked at `.wren/runtime`. Before working w
 If you'd rather not use `wren install`, download a release, check it, unpack it wherever you keep releases, and link it into the project yourself:
 
 ```sh
-curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.5.0/wren-runtime-0.5.0-mac-arm64.zip
-curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.5.0/SHA256SUMS
+curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.6.0/wren-runtime-0.6.0-mac-arm64.zip
+curl -fLO https://github.com/MultiboxLabs/wren-runtime/releases/download/v0.6.0/SHA256SUMS
 shasum -a 256 --ignore-missing -c SHA256SUMS
-ditto -x -k wren-runtime-0.5.0-mac-arm64.zip ~/wren-runtimes
+ditto -x -k wren-runtime-0.6.0-mac-arm64.zip ~/wren-runtimes
 # In the project's folder:
-mkdir -p .wren && ln -s ~/wren-runtimes/wren-runtime-0.5.0-mac-arm64 .wren/runtime
+mkdir -p .wren && ln -s ~/wren-runtimes/wren-runtime-0.6.0-mac-arm64 .wren/runtime
 echo '*' > .wren/.gitignore
 ```
 

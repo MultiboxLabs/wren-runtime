@@ -209,6 +209,40 @@ WREN_API void Wren_GetDefaultBrowserState(WrenDefaultBrowserCallback callback,
 WREN_API void Wren_SetAsDefaultBrowser(WrenDefaultBrowserCallback callback,
                                        void* context);
 
+// --- Requests to open URLs --------------------------------------------------
+//
+// What on_open_urls gets (Wren.h): the URLs, and where the request came from
+// when the system says. Only macOS says. On a platform that cannot tell, every
+// request is WREN_OPEN_URLS_SOURCE_UNKNOWN, with no app.
+
+// Where a request to open URLs came from.
+typedef enum WrenOpenURLsSource {
+  // The system did not say, or the sender had gone, as a command such as
+  // `open` has by the time the app reads it. A call the app makes itself to
+  // its NSApplicationDelegate's -application:openURLs: is also unknown.
+  WREN_OPEN_URLS_SOURCE_UNKNOWN = 0,
+  // An app on this computer: a link clicked in it, or a file it opened.
+  WREN_OPEN_URLS_SOURCE_APP = 1,
+  // Handoff from another device. The system does not say which device.
+  WREN_OPEN_URLS_SOURCE_HANDOFF = 2,
+} WrenOpenURLsSource;
+
+// The system asked the app to open URLs (on_open_urls). Valid only during the
+// call. The strings are UTF-8.
+struct WrenOpenURLsRequest {
+  // 1 or more.
+  const char* const* urls;
+  size_t url_count;
+  WrenOpenURLsSource source;
+  // For WREN_OPEN_URLS_SOURCE_APP. Each is NULL when unknown. On macOS,
+  // app_id is the bundle ID, app_name the name Finder shows, and app_path
+  // the .app. A helper inside an app reports the app around it. A program
+  // in no app has only its file name, as app_name.
+  const char* app_id;
+  const char* app_name;
+  const char* app_path;
+};
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -7,7 +7,7 @@ Your browser can update itself the way Chrome does. It checks and downloads in t
 - Your app relaunches as Chrome does, keeping each Profile's session.
 - Sparkle can take over the relaunch, and install the update before it starts the app again.
 
-This page uses Sparkle 2, with code in Swift. Both samples update this way, in `Updates.swift` in the native sample and `host/src/updates.rs` in the web sample.
+This page uses Sparkle 2, with code in Swift. Both samples update this way, in `App/Updates.swift` in the native sample and `host/src/updates.rs` in the web sample.
 
 ## Adding Sparkle
 

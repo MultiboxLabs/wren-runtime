@@ -13,6 +13,7 @@ This page covers the main menu, the Dock menu, the warning before quitting, cont
 | A submenu | `.submenu(label:role:items:)` | `MenuItem::Submenu` | A menu inside a menu, up to four deep |
 | The system's | `.role(_:label:key:enabled:)` | `MenuItem::Role` | A standard item, such as Copy, Minimize or Quit. Main menu only. |
 | Chromium's | `.chromium(_:label:key:enabled:)` | `MenuItem::Chromium` | A command from Chrome's own menu. Main menu only. |
+| A page's | `.page(name:label:enabled:)` | `MenuItem::Page` | One of Chromium's items in a page's context menu, by name. [A page's menu](#a-pages-menu) only. |
 
 An item's `key` is written the way a page's `KeyboardEvent.key` names it, with modifiers. That's one character, such as `"t"`, `"["` or `"+"`, or a key's name, such as `"Enter"`, `"ArrowLeft"` or `"F5"`. An upper-case letter means the letter with Shift. The modifier `.primary` is ⌘ on a Mac, and Control elsewhere. IDs must be unique within a menu, and labels show exactly as you give them.
 
@@ -127,28 +128,159 @@ A browser drawn in HTML can ask in its page, and send the answer back as a [mess
 
 ## Context menus
 
+Every context menu is shown the same way: you get a menu, give it a list of items, and hear what was chosen. A menu is either one you make for your own UI, such as a right-click on your tab strip, or one Chromium is about to show for a page.
+
+### Menus for your own UI
+
 ```swift
-try WrenApp.showContextMenu([
+let menu = try ContextMenu(view: webView.view, at: point)
+try menu.show([
     .item(id: "pin", label: try tab.state().pinned ? "Unpin Tab" : "Pin Tab"),
     .submenu(label: "Add to Group", items: groups.map {
         .item(id: "group:\($0.id)", label: $0.title)
     }),
     .separator,
     .item(id: "close", label: "Close Tab", key: MenuKey("w")),
-], in: webView.view, at: point) { chosen in
-    // chosen is "pin", "group:" and an ID, "close", or nil.
+]) { choice in
+    // choice.appItem is "pin", "group:" and an ID, "close", or nil.
 }
+```
+
+```rust
+let menu = mt.create_context_menu(web_view.view(), point)?;
+menu.show(
+    &[
+        MenuItem::item("pin", if tab.state()?.pinned { "Unpin Tab" } else { "Pin Tab" }),
+        MenuItem::submenu(
+            "Add to Group",
+            groups.iter().map(|g| MenuItem::item(format!("group:{}", g.id), &g.title)).collect(),
+        ),
+        MenuItem::Separator,
+        MenuItem::Item {
+            id: "close".into(),
+            label: "Close Tab".into(),
+            enabled: true,
+            checked: false,
+            hidden: false,
+            key: Some(MenuKey::new("w", MenuModifiers::PRIMARY)),
+        },
+    ],
+    |choice| {
+        // choice.app_item is "pin", "group:" and an ID, "close", or None.
+    },
+)?;
 ```
 
 `point` is in points from the top left of the view you name, which can be a web view's view, a tab's view, or one of your own, in a window. In a web view's page, the `clientX` and `clientY` of the `contextmenu` event give that point, at 100% zoom. Over a web view's or a tab's view, the menu belongs to its page, as Chrome's page menu does, so the system's items, such as Services, act on the page.
 
-The call returns at once, and the menu opens from the event loop. The closure runs once, after the menu has closed, with the chosen item's ID. It gets nil if the menu was dismissed, another context menu replaced it, its web view ended, or its tab closed.
+`show` returns at once, and the menu opens from the event loop. The closure runs once, after the menu has closed. Nothing is chosen if the menu was dismissed, you closed it with `close()`, another context menu replaced it, its web view ended, or its tab closed. One context menu is open at a time, so making a new one closes the one before.
 
 A context menu shows keys beside the labels as a hint, but doesn't listen for them.
 
 A web view's page can't call Wren Runtime itself, so it sends its items and the point to your app as a [message](messages.md). Your handler shows the menu and answers with the choice, which the page awaits. That's a few lines on each side.
 
-In a web view, text fields have Wren Runtime's own editing menu, as [Web views](web-views.md#how-a-web-view-differs-from-a-tab) describes. A tab's page has Chromium's menus.
+### A page's menu
+
+Before Chromium shows a page's context menu, it asks your app, with what the menu is about and every item it built. That covers a tab's page, a PDF, DevTools, a side panel and an extension's popup. In a web view, only a text field asks, about Wren Runtime's editing menu, as [Web views](web-views.md#how-a-web-view-differs-from-a-tab) describes. You answer with Chromium's menu, your own, or none. With no handler, Chromium's menu shows, as before.
+
+Each of Chromium's items has a name, which stays the same in every language and release, such as `open-link-new-tab`. Match items by name, never by label. Your own list can hold Chromium's items by name, as `.page` items, among yours. So leaving out an item, or adding one of your own, takes a line or two:
+
+```swift
+appDelegate.contextMenu = { request in
+    guard request.host == .tab, let link = request.linkURL else { return .chromium }
+    var items = request.pageItems
+    items.remove(named: ContextMenuItemName.openLinkInProfile)
+    items.insert(
+        .item(id: "mini", label: "Open Link in Mini Window"),
+        after: ContextMenuItemName.openLinkNewTab)
+    // The answer comes first; the menu shows from the event loop.
+    DispatchQueue.main.async {
+        try? request.menu.show(items) { choice in
+            if choice.appItem == "mini" { openMiniWindow(link) }
+        }
+    }
+    return .app
+}
+```
+
+```rust
+fn context_menu(&self, mt: MainThread, request: &ContextMenuRequest) -> PopoverAnswer {
+    let (ContextMenuHost::Tab, Some(link)) = (request.host, request.link_url.clone()) else {
+        return PopoverAnswer::Chromium;
+    };
+    let mut items = request.page_items();
+    items.remove_named(context_menu_item::OPEN_LINK_IN_PROFILE);
+    items.insert_after(
+        context_menu_item::OPEN_LINK_NEW_TAB,
+        MenuItem::item("mini", "Open Link in Mini Window"),
+    );
+    // The answer comes first; the menu shows from the event loop.
+    let menu = request.menu;
+    mt.later(move |_| {
+        let _ = menu.show(&items, move |choice| {
+            if choice.app_item.as_deref() == Some("mini") {
+                open_mini_window(&link);
+            }
+        });
+    });
+    PopoverAnswer::App
+}
+```
+
+The handler runs inside Chromium's call, as `popover` does, so it decides there and shows the menu from the event loop. A request you answer with your own stays open until it has shown and closed, or you close it. Wren Runtime closes it when Chrome would close its menu: the tab is hidden or closes, the page goes to another document, or another menu opens.
+
+Chromium's items keep their command, state, icon and submenu, and their label unless you give one. When the user chooses one, Chromium runs it, and the closure hears its name in `chromiumItem`. A name that isn't in this menu is left out, so a list still works when Chromium leaves an item out of a menu. Each of Chromium's items may appear once, and a submenu of Chromium's brings its own items. Separators at either end of a menu, or after another separator, are left out.
+
+Some names end in a part that varies: `extension:<extension ID>:<item ID>` for an extension's items, and `open-link-in-profile-<n>`, `spelling-suggestion-<n>` and `custom-<n>`, counted from 1. A name that starts `chromium-` is an item Wren Runtime hasn't named yet, and it may change in any release, so never match it. The request's items also give each label, its state and whether it has an icon.
+
+### Drawing a page's menu yourself
+
+Your app can also draw Chromium's menu itself, in its own UI or in a web view's page, with Chromium's items, icons and commands. Answer with your own menu, and don't call `show`. Draw the request's items, copy each icon with `iconPNG`, and when the user chooses one of Chromium's items, run it with `run`, which closes the request. Chromium can change an item while the menu is open, as it turns on Copy Link to Highlight once it has made the link. Your app then hears a `.contextMenu` change, and reads the menu again with `read`. The same change comes when the request closes, and `read` then throws `.contextMenuClosed`.
+
+```swift
+appDelegate.contextMenu = { request in
+    guard request.host == .tab else { return .chromium }
+    myMenu.open(request.items, at: request.point, for: request.menu)
+    return .app
+}
+// When the user chooses one of Chromium's items in your menu:
+// try request.menu.run(item.name)
+appDelegate.changed = { changes in
+    for change in changes where change.kind == .contextMenu {
+        guard let menu = change.contextMenu, menu == myMenu.request else { continue }
+        if let request = try? menu.read() {
+            myMenu.update(request.items)
+        } else {
+            myMenu.close()
+        }
+    }
+}
+```
+
+```rust
+fn context_menu(&self, _mt: MainThread, request: &ContextMenuRequest) -> PopoverAnswer {
+    if request.host != ContextMenuHost::Tab {
+        return PopoverAnswer::Chromium;
+    }
+    self.menu.open(&request.items, request.point, request.menu);
+    PopoverAnswer::App
+}
+// When the user chooses one of Chromium's items in your menu:
+// request.menu.run(&name)?;
+fn changed(&self, _mt: MainThread, changes: &[Change]) {
+    for change in changes.iter().filter(|c| c.kind == ChangeKind::ContextMenu) {
+        if change.context_menu != self.menu.request() {
+            continue;
+        }
+        match change.context_menu.map(ContextMenu::read) {
+            Some(Ok(request)) => self.menu.update(&request.items),
+            _ => self.menu.close(),
+        }
+    }
+}
+```
+
+Running an item works as a click on it in Chromium's menu: Chromium hears its menu close first, then runs the item. `run` refuses an item that is off or hidden, and a request you've shown with `show`. A menu you made yourself has none of Chromium's items, so `run`, `read` and `iconPNG` refuse it. Icons are PNGs at 2x, to draw at 16 points.
 
 ## Copying and pasting from your own commands
 
@@ -212,6 +344,15 @@ Wren Runtime reads and writes text and URLs only. HTML, rich text, images and fi
 | `WrenApp.setDockMenu` | `MainThread::set_dock_menu` | `Wren_SetDockMenu` |
 | `AppDelegate.quitPrompt`, `QuitPrompt` | `App::quit_prompt`, `QuitPrompt` | `on_quit_prompt`, `WrenQuitPrompt` |
 | `WrenApp.quitWarning`, `WrenApp.setQuitWarning` | `MainThread::quit_warning`, `MainThread::set_quit_warning` | `Wren_GetQuitWarningState`, `Wren_SetQuitWarning` |
-| `WrenApp.showContextMenu` | `MainThread::show_context_menu` | `Wren_ShowContextMenu` |
+| `ContextMenu(view:at:)` | `MainThread::create_context_menu` | `Wren_CreateContextMenu` |
+| `ContextMenu.show`, `ContextMenuChoice` | `ContextMenu::show`, `ContextMenuChoice` | `Wren_ShowContextMenu`, `WrenContextMenuChoice` |
+| `ContextMenu.close` | `ContextMenu::close` | `Wren_CloseContextMenu` |
+| `ContextMenu.run` | `ContextMenu::run` | `Wren_RunContextMenuItem` |
+| `ContextMenu.read` | `ContextMenu::read` | `Wren_ReadContextMenu` |
+| `ContextMenu.iconPNG` | `ContextMenu::icon_png` | `Wren_CopyContextMenuIconPNG` |
+| `.contextMenu`, `Change.contextMenu` | `ChangeKind::ContextMenu`, `Change::context_menu` | `WREN_CHANGE_CONTEXT_MENU`, `WrenChange.context_menu` |
+| `AppDelegate.contextMenu`, `ContextMenuRequest` | `App::context_menu`, `ContextMenuRequest` | `on_context_menu`, `WrenContextMenuRequest` |
+| `.page(name:label:enabled:)` | `MenuItem::Page` | `WREN_MENU_ITEM_PAGE` |
+| `ContextMenuItemName` | `context_menu_item` | `WREN_CONTEXT_MENU_ITEM_*` |
 | `WrenApp.writeClipboard`, `ClipboardData` | `MainThread::write_clipboard`, `ClipboardData` | `Wren_WriteClipboard`, `WrenClipboardData` |
 | `WrenApp.readClipboard` | `MainThread::read_clipboard` | `Wren_ReadClipboard` |

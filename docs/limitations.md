@@ -43,6 +43,10 @@ A scheme of your own can't take a request body, stream a response, redirect, or 
 
 A web view can't tell you its page's address or title yet.
 
+## Extensions
+
+An internal app extension's rule files for `declarativeNetRequest` don't apply. Wren Runtime loads an internal extension as one of Chromium's own components, and Chromium never reads a component's rule files.
+
 ## The `wren` command
 
 `wren` makes an app, not a disk image.

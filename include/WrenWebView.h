@@ -19,8 +19,10 @@
 // - Only a text field has a context menu, and it is Wren's own. It has
 //   spelling suggestions, undo, cut, copy, paste and select all. It also has
 //   Inspect, unless the view was made with disallow_user_devtools_activation.
-//   Elsewhere, the page sends its own items from its contextmenu event to the
-//   app, and the app shows them (Wren_ShowContextMenu, WrenMenus.h).
+//   Wren asks on_context_menu first, as for Chromium's menus
+//   (WrenContextMenus.h). Elsewhere, the page sends its own items from its
+//   contextmenu event to the app, and the app shows them
+//   (Wren_ShowContextMenu).
 // - A key the page does not handle goes to the app's main menu, as a tab's
 //   does. So the menu's shortcuts work while the page has focus.
 // - The app reads whether the page is loading, failed to load, lost its
@@ -139,6 +141,9 @@ WREN_API WrenResult Wren_LoadWebView(WrenWebView* view, const char* url);
 typedef struct WrenWebViewState {
   // True while the page is loading, as WrenTabState.loading is for a tab.
   bool loading;
+  // As WrenTabState.shows_loading and load_progress are for a tab.
+  bool shows_loading;
+  int load_progress;
   // Chromium's network error for the page's last load, or 0 if it did not
   // fail. An error is a negative number:
   //
@@ -275,6 +280,13 @@ WREN_API WrenResult Wren_CloseWebViewDevTools(WrenWebView* view);
 //   data-id takes it from the first.
 // - An element whose data-id changes shows the other thing. An element for a
 //   tab that has closed, or with an ID that names nothing, is empty.
+// - An element with the `hidden` attribute keeps what it shows, at the size
+//   and place the page gives it, and is not drawn and takes no clicks.
+//   Chromium hides a tab in a hidden element as Chrome hides a background
+//   tab. So a page can keep an element for every tab, and switch tabs by
+//   which elements are hidden. A tab whose page leaves its element and comes
+//   back, when the element goes or its data-id changes, shows its canvases
+//   blank until the page draws to them again.
 // - The page learns the IDs from the app, in its address or by asking (see
 //   "Messages").
 // - Wren defines the element in the page with a script of its own. A page

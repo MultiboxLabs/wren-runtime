@@ -157,3 +157,4 @@ If two uses shouldn't share cookies and storage, give each its own Profile. A si
 | `WebView` | `WebView` | `Wren_CreateWebView` |
 | `WrenApp.createEphemeralProfile` | `MainThread::create_ephemeral_profile` | `Wren_CreateEphemeralProfile` |
 | `AppDelegate.reopen`, `openURLs`, `willQuit` | `App::reopen`, `open_urls`, `will_quit` | `on_reopen`, `on_open_urls`, `on_will_quit` |
+| `OpenURLsRequest`, `OpenURLsSource` | `OpenURLsRequest`, `OpenURLsSource` | `WrenOpenURLsRequest`, `WrenOpenURLsSource` |

@@ -68,7 +68,7 @@ extern "C" {
 // WrenUnstableUI.h has its own version, WREN_UNSTABLE_UI_VERSION. Set
 // WrenStartup.api_version to this. Wren_Main refuses any other version. The
 // Compatibility guide has the details.
-#define WREN_API_VERSION 76
+#define WREN_API_VERSION 90
 
 typedef struct WrenProfile WrenProfile;
 typedef struct WrenBrowser WrenBrowser;
@@ -165,6 +165,8 @@ typedef enum WrenResult {
   // The tab's page gave no picture: it is discarded, crashed or of no size,
   // or drew nothing in time. See Wren_CaptureTab.
   WREN_ERROR_NO_IMAGE = 16,
+  // The context menu has closed, or never existed. See WrenContextMenus.h.
+  WREN_ERROR_CONTEXT_MENU_CLOSED = 17,
 } WrenResult;
 
 // Receives the result of a call that answers later, from the event loop.
@@ -181,7 +183,8 @@ typedef enum WrenTabCrash {
   WREN_TAB_CRASH_NONE = 0,
   // The page's renderer crashed.
   WREN_TAB_CRASH_CRASHED = 1,
-  // The system or chrome://kill killed the page's renderer.
+  // The system or chrome://kill killed the page's renderer, or the renderer
+  // failed to start.
   WREN_TAB_CRASH_KILLED = 2,
   // The renderer ran out of memory.
   WREN_TAB_CRASH_OUT_OF_MEMORY = 3,
@@ -373,6 +376,51 @@ typedef enum WrenChannel {
   WREN_CHANNEL_CANARY = 4,
 } WrenChannel;
 
+// Which client hints a WrenUserAgent sends: the Sec-CH-UA request headers and
+// navigator.userAgentData.
+typedef enum WrenClientHints {
+  // The hints of the app's default (WrenStartup.user_agent), or Chromium's.
+  WREN_CLIENT_HINTS_DEFAULT = 0,
+  // None. Requests carry no Sec-CH-UA headers, and navigator.userAgentData
+  // lists no brands. Safari sends neither.
+  WREN_CLIENT_HINTS_NONE = 1,
+  // The brands and fields of the WrenUserAgent.
+  WREN_CLIENT_HINTS_CUSTOM = 2,
+} WrenClientHints;
+
+// A brand the client hints list, such as "Chromium" at "157.0.8103.51".
+typedef struct WrenUserAgentBrand {
+  const char* brand;
+  // The full version. Sec-CH-UA sends the part before the first ".".
+  const char* version;
+} WrenUserAgentBrand;
+
+// The user agent pages see: the User-Agent header, navigator.userAgent and
+// the client hints. WrenUserAgent.h says which pages get which one. Every
+// string is printable ASCII. A value that breaks these rules is refused.
+typedef struct WrenUserAgent {
+  // Required. 1 to 1,024 characters, with no space at either end.
+  const char* user_agent;
+  // A value outside WrenClientHints is refused.
+  WrenClientHints client_hints;
+  // The rest are for WREN_CLIENT_HINTS_CUSTOM only, and are ignored
+  // otherwise. 1 to 8 brands. A brand and its version are each 1 to 64
+  // characters, without " or \. Chromium lists its own product last, and
+  // the hints report the last brand's version as the full version.
+  const WrenUserAgentBrand* brands;
+  size_t brand_count;
+  // Optional. Each is up to 64 characters, without " or \. NULL sends an
+  // empty value.
+  const char* platform;          // e.g. "macOS"
+  const char* platform_version;  // e.g. "26.1.0"
+  const char* architecture;      // e.g. "arm"
+  const char* bitness;           // e.g. "64"
+  const char* model;
+  // Sec-CH-UA-Mobile, and the form factor the hints report: "Mobile" if true,
+  // "Desktop" if false.
+  bool mobile;
+} WrenUserAgent;
+
 // How Chromium starts. Wren reads every field before Wren_Main hands control
 // to Chromium. It copies the strings and the icons.
 typedef struct WrenStartup {
@@ -401,6 +449,7 @@ typedef struct WrenStartup {
   // struct.
   const char* const* development_switches;
   size_t development_switch_count;
+
   WrenMenu menu;
   // Optional. The app's name in Chromium's own UI, in place of "Chromium",
   // "Chrome" and "Google Chrome". Chromium's own UI is its WebUI pages, such as
@@ -498,6 +547,16 @@ typedef struct WrenStartup {
   // A key is 1 to 256 letters, digits, "-" and "_". Any other ends Wren_Main
   // with WREN_EXIT_INVALID_STARTUP.
   const char* google_api_key;
+  // Optional. The app's default user agent, which every page, worker and
+  // request sends unless a site rule or a tab's setting chooses another
+  // (WrenUserAgent.h). Chromium's processes read it as they start, so it is
+  // set here and nowhere else. NULL keeps Chromium's. With
+  // WREN_CLIENT_HINTS_DEFAULT, it sends Chromium's client hints. A value that
+  // breaks WrenUserAgent's rules ends Wren_Main with
+  // WREN_EXIT_INVALID_STARTUP.
+  const WrenUserAgent* user_agent;
+  // Experimental. Enables DRM, as far as the platform supports it.
+  bool drm;
 } WrenStartup;
 
 // --- Changes ----------------------------------------------------------------
@@ -632,6 +691,22 @@ typedef enum WrenChangeKind {
   // come in the first on_changed. A Browser Chromium shows for a Profile it
   // has just loaded, as a restore may, reaches on_browser_opened first.
   WREN_CHANGE_PROFILE_OPENED = 32,
+  // Either of `profile`'s autofill switches was turned on or off, by the app,
+  // chrome://settings or policy. See Wren_GetAutofillState (WrenBrowser.h).
+  // An off-the-record Profile's autofill is its original's, and each of the
+  // two the app has read hears the change. Reported once the app has read it.
+  WREN_CHANGE_AUTOFILL = 33,
+  // `profile`'s cookie settings changed, by the app, chrome://settings,
+  // policy or an extension. See Wren_GetCookieSettings (WrenCookies.h). An
+  // off-the-record Profile's are its original's, and each of the two the app
+  // has read hears the change. Reported once the app has read them.
+  WREN_CHANGE_COOKIE_SETTINGS = 34,
+  // A context menu request of Chromium's, `context_menu`, changed or closed.
+  // One of its items turned on or off, was shown or hidden, or was
+  // relabelled, or the request closed. Only requests the app answered with
+  // WREN_POPOVER_APP report this. See Wren_ReadContextMenu
+  // (WrenContextMenus.h).
+  WREN_CHANGE_CONTEXT_MENU = 35,
 } WrenChangeKind;
 
 // Bits of WrenChange.tab_fields.
@@ -689,6 +764,11 @@ typedef enum WrenTabField {
   WREN_TAB_FIELD_MEDIA = 1u << 19,
   // The media's title, artist, album, source or artwork changed.
   WREN_TAB_FIELD_MEDIA_METADATA = 1u << 20,
+  // Chrome's spinner for the tab started or stopped. See
+  // WrenTabState.shows_loading.
+  WREN_TAB_FIELD_SHOWS_LOADING = 1u << 21,
+  // WrenTabState.load_progress changed.
+  WREN_TAB_FIELD_LOAD_PROGRESS = 1u << 22,
 } WrenTabField;
 
 // A download (WrenDownloads.h). Unique for the life of the process, and never
@@ -704,29 +784,35 @@ typedef uint64_t WrenDownloadsPromptID;
 typedef uint64_t WrenPopoverID;
 #define WREN_NO_POPOVER 0
 
+// A context menu, the app's or Chromium's (WrenContextMenus.h). Unique for the
+// life of the process, and never reused. WREN_NO_CONTEXT_MENU means none.
+typedef uint64_t WrenContextMenuID;
+#define WREN_NO_CONTEXT_MENU ((WrenContextMenuID)0)
+
 // One change. Wren coalesces changes. Each on_changed call has at most one
-// record per Profile, Browser, tab, group, split, popover request, web view
-// and download, in the order of each one's first change. A tab's fields are
-// combined into one record. Handles are borrowed.
+// record per Profile, Browser, tab, group, split, popover request, web view,
+// download and context menu, in the order of each one's first change. A tab's
+// fields are combined into one record. Handles are borrowed.
 //
 // Wren keeps no copy of Chromium's state for the app. When a change arrives,
 // read again what it names.
 typedef struct WrenChange {
   WrenChangeKind kind;
   // PROFILE_CLOSED, PROFILE_OPENED, DOWNLOADS, BOOKMARKS, EXTENSIONS,
-  // DOWNLOAD
+  // DOWNLOAD, AUTOFILL, COOKIE_SETTINGS
   WrenProfile* profile;
   // Every kind but PROFILES, PROFILE_CLOSED, PROFILE_OPENED, WEB_VIEW,
-  // DOWNLOADS, BOOKMARKS, QUIT_WARNING, EXTENSIONS, DOWNLOAD and
-  // DEFAULT_BROWSER.
+  // DOWNLOADS, BOOKMARKS, QUIT_WARNING, EXTENSIONS, DOWNLOAD,
+  // DEFAULT_BROWSER, AUTOFILL, COOKIE_SETTINGS and CONTEXT_MENU.
   WrenBrowser* browser;
-  WrenTabID tab;            // TAB
-  uint32_t tab_fields;      // TAB
-  WrenTabGroupID group;     // GROUP
-  WrenSplitID split;        // SPLIT
-  WrenPopoverID popover;    // POPOVER
-  WrenWebView* web_view;    // WEB_VIEW
-  WrenDownloadID download;  // DOWNLOAD
+  WrenTabID tab;                   // TAB
+  uint32_t tab_fields;             // TAB
+  WrenTabGroupID group;            // GROUP
+  WrenSplitID split;               // SPLIT
+  WrenPopoverID popover;           // POPOVER
+  WrenWebView* web_view;           // WEB_VIEW
+  WrenDownloadID download;         // DOWNLOAD
+  WrenContextMenuID context_menu;  // CONTEXT_MENU
 } WrenChange;
 
 // --- App delegate -----------------------------------------------------------
@@ -760,10 +846,16 @@ typedef struct WrenQuitPrompt WrenQuitPrompt;
 typedef struct WrenWindowRequest WrenWindowRequest;
 // Defined in WrenExtensions.h, "App extensions".
 typedef struct WrenProfileExtensionsRequest WrenProfileExtensionsRequest;
+// Defined in WrenApp.h, "Requests to open URLs".
+typedef struct WrenOpenURLsRequest WrenOpenURLsRequest;
+// Defined in WrenContextMenus.h, "Chromium's context menus".
+typedef struct WrenContextMenuRequest WrenContextMenuRequest;
 
-// Chromium's kinds of Browser, one for one. What a Browser's window shows
-// comes from Wren_GetWindowFeatures, not from its type, because two popups
-// can differ.
+// Chromium's kinds of Browser. Chromium's floating kind is a Document
+// Picture-in-Picture window or a page's always-on-top popup, and is
+// WREN_BROWSER_PICTURE_IN_PICTURE or WREN_BROWSER_POPUP. What a Browser's
+// window shows comes from Wren_GetWindowFeatures, not from its type, because
+// two popups can differ.
 typedef enum WrenBrowserType {
   // A tabbed window.
   WREN_BROWSER_NORMAL = 0,
@@ -832,9 +924,9 @@ typedef struct WrenAppDelegate {
   void (*on_reopen)(void* context, bool has_visible_windows);
   // The system asked the app to open URLs, through an open-URL Apple Event, a
   // file or Handoff. Wren opens nothing itself. The app declares its own URL
-  // schemes and document types in Info.plist. The strings are UTF-8, and valid
-  // only during the call.
-  void (*on_open_urls)(void* context, const char* const* urls, size_t count);
+  // schemes and document types in Info.plist. `request` says where the URLs
+  // came from, and is valid only during the call (WrenApp.h).
+  void (*on_open_urls)(void* context, const WrenOpenURLsRequest* request);
   // The app is quitting. Runs once, after on_quit_committed and every
   // on_browser_closed.
   void (*on_will_quit)(void* context);
@@ -969,6 +1061,19 @@ typedef struct WrenAppDelegate {
   // Wren_PostToMainThread.
   WrenNavigationAnswer (*on_navigation)(void* context,
                                         const WrenNavigationRequest* request);
+  // Chromium is about to show a page's context menu (WrenContextMenus.h). The
+  // app answers whose menu it is, as for a popover:
+  //
+  // - WREN_POPOVER_CHROMIUM shows Chromium's menu, as if there were no
+  //   handler.
+  // - WREN_POPOVER_APP means the app shows its own: a native one with
+  //   Wren_ShowContextMenu, from the event loop, or one it draws.
+  // - WREN_POPOVER_NONE shows nothing.
+  //
+  // `request` is valid only during the call. NULL shows Chromium's menu every
+  // time. Runs inside Chromium's call, with on_popover's rules (WrenUI.h).
+  WrenPopoverAnswer (*on_context_menu)(void* context,
+                                       const WrenContextMenuRequest* request);
 } WrenAppDelegate;
 
 // --- Lifecycle and version --------------------------------------------------
@@ -1062,6 +1167,8 @@ WREN_API WrenResult Wren_PostToMainThreadAfter(int64_t delay_ms,
 
 // Profiles, Browsers, full screen and side panels.
 #include "WrenBrowser.h"
+// A Profile's cookies and its cookie settings.
+#include "WrenCookies.h"
 // Tabs, navigation, groups, splits and DevTools.
 #include "WrenTabs.h"
 // Extensions' actions and the installed list.
@@ -1084,10 +1191,14 @@ WREN_API WrenResult Wren_PostToMainThreadAfter(int64_t delay_ms,
 #include "WrenSession.h"
 // The app's own URL schemes.
 #include "WrenSchemes.h"
+// The user agent pages see, by site and by tab.
+#include "WrenUserAgent.h"
 // Pages the app places that are not tabs.
 #include "WrenWebView.h"
 // Menus the app describes as data.
 #include "WrenMenus.h"
+// Context menus, the app's and Chromium's.
+#include "WrenContextMenus.h"
 // The system clipboard.
 #include "WrenClipboard.h"
 // Quitting, relaunching and updates, and the default browser.

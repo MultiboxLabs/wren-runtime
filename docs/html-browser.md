@@ -58,11 +58,19 @@ browser.attach_to_view(Some(web_view.view()));
 Chromium owns the tabs. The host reads them when the page asks or a change arrives, and keeps no copy. The page keeps the last copy it was sent, and draws from it. A click in the page changes nothing by itself. It calls the host, and the page hears the result as a change, like every other change.
 
 ```tsx
-// The page
+// The page: an element for every tab, the background ones hidden
 <div className="tab" onPointerDown={() => wren.invoke("tabs.activate", tab.id)}>
   {tab.title}
-</div>
-<wren-view data-id={`tab-${active}`} />
+</div>;
+{
+  tabs.map((tab) => (
+    <wren-view
+      key={tab.id}
+      data-id={`tab-${tab.id}`}
+      hidden={tab.id !== active}
+    />
+  ));
+}
 ```
 
 ```swift
@@ -104,14 +112,15 @@ Keep every message name in one file that types the page's code, as the sample's 
 
 | Piece | The page | The host |
 | --- | --- | --- |
-| Tabs' pages and side panels | A [`<wren-view>`](views-in-web-views.md) for each, by ID. A split is two elements with a divider of your own. | Sends the IDs |
+| Tabs' pages and side panels | A [`<wren-view>`](views-in-web-views.md) for each, by ID, with the background tabs' [hidden](views-in-web-views.md#switching-tabs). A split is two elements with a divider of your own. | Sends the IDs |
 | Chromium's bubbles, such as page info, permission prompts and the star | A [mark](anchors-in-web-views.md) over each button | Names each mark once as the Browser's anchor, and opens a bubble when the page asks |
 | Extensions' buttons | A mark over each, drawn while it's pinned or popped out | Names `extension:<id>` for each, and sends the extensions' state |
 | Your own popover in place of Chromium's, such as an extensions panel | Draws it from what the host sends, and says when it closes | Answers `popover` with its own, sends the data, and closes the request |
 | The address field | An `<input>` and a list, from Chromium's location state and suggestions | Passes on the typed text and the suggestions, from [`WrenOmnibox.h`](../include/WrenOmnibox.h) |
 | A crashed tab, the status bubble | HTML of its own over the tab's element | Sends the tab's state |
 | Full screen | Hides its bars while a tab is in full screen | Takes the window in and out of full screen, and says which tab |
-| Context menus | Sends the items, and waits for the choice | Shows them with [`showContextMenu`](menus.md#context-menus), and answers with the choice |
+| Context menus | Sends the items, and waits for the choice | Shows them with a [`ContextMenu`](menus.md#context-menus), and answers with the choice |
+| A page's context menu, drawn in HTML | Draws Chromium's items and icons, and sends the one chosen | Answers `context_menu` with its own, sends the items again on each change, and runs the choice. See [Drawing a page's menu yourself](menus.md#drawing-a-pages-menu-yourself). |
 | The main menu | Nothing | Sets it [as data](menus.md#the-main-menu), with `setMainMenu`. Keys the page doesn't use go to it. |
 | DevTools for the page itself | A menu item or a key | `openDevTools()` and `closeDevTools()` on the web view. See [Web views](web-views.md#devtools). |
 
